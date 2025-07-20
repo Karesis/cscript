@@ -34,80 +34,80 @@ where
     expr.define({
         let atom = choice((
             select! {
-                Token::Integer(s) = e => Expression {
-                    kind: ExprKind::Literal(LiteralValue::Integer(s.parse().unwrap())),
-                    span: e.span(),
-                },
-                Token::String(s) = e => Expression {
-                    kind: ExprKind::Literal(LiteralValue::String(s)),
-                    span: e.span(),
-                },
-                Token::Boolean(b) = e => Expression {
-                    kind: ExprKind::Literal(LiteralValue::Bool(b)),
-                    span: e.span(),
-                },
+                Token::Integer(s) = e => Expression { kind: ExprKind::Literal(LiteralValue::Integer(s.parse().unwrap())), span: e.span() },
+                Token::String(s) = e => Expression { kind: ExprKind::Literal(LiteralValue::String(s)), span: e.span() },
+                Token::Boolean(b) = e => Expression { kind: ExprKind::Literal(LiteralValue::Bool(b)), span: e.span() },
             },
             ident.clone().map(|ident| Expression { span: ident.span.clone(), kind: ExprKind::Variable(ident) }),
             expr.clone().delimited_by(just(Token::LParen), just(Token::RParen)),
         ));
         
         let call = atom.clone().then(
-            expr.clone()
-                .separated_by(just(Token::Comma))
-                .allow_trailing()
-                .collect()
-                .delimited_by(just(Token::LParen), just(Token::RParen))
-                .or_not()
+            expr.clone().separated_by(just(Token::Comma)).allow_trailing().collect()
+                .delimited_by(just(Token::LParen), just(Token::RParen)).or_not()
         ).map_with(|(callee, opt_call), e| {
             if let Some(args) = opt_call {
                 if let ExprKind::Variable(name) = callee.kind {
-                    Expression {
-                        kind: ExprKind::FunctionCall { name, args },
-                        span: e.span(),
-                    }
+                    Expression { kind: ExprKind::FunctionCall { name, args }, span: e.span() }
                 } else { callee }
             } else { callee }
         });
 
         let op = |c| just(c);
         let unary_op = op(Token::Minus).to(UnaryOp::Negate)
-            .or(op(Token::Not).to(UnaryOp::Not));
+            .or(op(Token::Not).to(UnaryOp::Not))
+            .or(op(Token::Ampersand).to(UnaryOp::AddressOf)) 
+            .or(op(Token::Star).to(UnaryOp::Dereference));
         
-        let unary = unary_op
-            .repeated()
-            .foldr(call, |op, right| {
-                let span = right.span.clone();
-                Expression {
-                    kind: ExprKind::UnaryOp { op, right: Box::new(right) },
-                    span,
-                }
-            });
+        let unary = unary_op.repeated().foldr(call, |op, right| {
+            let span = right.span.clone();
+            Expression { kind: ExprKind::UnaryOp { op, right: Box::new(right) }, span }
+        });
 
-        let product_op = op(Token::Star).to(BinaryOp::Multiply).or(op(Token::Slash).to(BinaryOp::Divide));
+        let product_op = op(Token::Star).to(BinaryOp::Multiply).or(op(Token::Slash).to(BinaryOp::Divide)).or(op(Token::Percent).to(BinaryOp::Modulo));
         let product = unary.clone().foldl(product_op.then(unary).repeated(), |left, (op, right)| {
             let span = left.span.start..right.span.end;
-            Expression {
-                kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) },
-                span,
-            }
+            Expression { kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) }, span }
         });
         
         let sum_op = op(Token::Plus).to(BinaryOp::Add).or(op(Token::Minus).to(BinaryOp::Subtract));
         let sum = product.clone().foldl(sum_op.then(product).repeated(), |left, (op, right)| {
             let span = left.span.start..right.span.end;
-            Expression {
-                kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) },
-                span,
-            }
+            Expression { kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) }, span }
+        });
+        
+        // [ADDED] 关系运算符层
+        let relational_op = op(Token::Lt).to(BinaryOp::Lt).or(op(Token::Lte).to(BinaryOp::Lte))
+            .or(op(Token::Gt).to(BinaryOp::Gt)).or(op(Token::Gte).to(BinaryOp::Gte));
+        let relation = sum.clone().foldl(relational_op.then(sum).repeated(), |left, (op, right)| {
+             let span = left.span.start..right.span.end;
+            Expression { kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) }, span }
         });
 
-        sum.clone().then(op(Token::Assign).to(()).then(expr.clone()).or_not())
+        // [ADDED] 相等运算符层
+        let equality_op = op(Token::Eq).to(BinaryOp::Eq).or(op(Token::NotEq).to(BinaryOp::NotEq));
+        let equality = relation.clone().foldl(equality_op.then(relation).repeated(), |left, (op, right)| {
+             let span = left.span.start..right.span.end;
+            Expression { kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) }, span }
+        });
+        
+        // [ADDED] 逻辑与运算符层
+        let logical_and = equality.clone().foldl(op(Token::And).to(BinaryOp::And).then(equality).repeated(), |left, (op, right)| {
+            let span = left.span.start..right.span.end;
+            Expression { kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) }, span }
+        });
+        
+        // [ADDED] 逻辑或运算符层
+        let logical_or = logical_and.clone().foldl(op(Token::Or).to(BinaryOp::Or).then(logical_and).repeated(), |left, (op, right)| {
+            let span = left.span.start..right.span.end;
+            Expression { kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) }, span }
+        });
+
+        // [UPDATED] 赋值运算符现在是最低优先级
+        logical_or.clone().then(op(Token::Assign).to(()).then(expr.clone()).or_not())
             .map_with(|(left, right_opt), e| {
                 if let Some((_, right)) = right_opt {
-                    Expression {
-                        kind: ExprKind::Assignment { left: Box::new(left), right: Box::new(right) },
-                        span: e.span(),
-                    }
+                    Expression { kind: ExprKind::Assignment { left: Box::new(left), right: Box::new(right) }, span: e.span() }
                 } else { left }
             })
             .labelled("expression")

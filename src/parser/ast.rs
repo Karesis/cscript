@@ -106,10 +106,9 @@ pub enum ExprKind {
         name: Ident,
         args: Vec<Expression>,
     },
-    // We'll add Indexing, MemberAccess, etc. later.
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum UnaryOp { 
     Not, 
     Negate, 
@@ -117,7 +116,7 @@ pub enum UnaryOp {
     Dereference 
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BinaryOp { 
     Add, 
     Subtract, 
@@ -134,7 +133,7 @@ pub enum BinaryOp {
     Or 
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub enum LiteralValue {
     Integer(i64),
     String(String),
@@ -156,7 +155,7 @@ pub enum Type {
 }
 
 /// An identifier, like a variable or function name.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub struct Ident {
     pub name: String,
     pub span: Span,
