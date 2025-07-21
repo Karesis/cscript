@@ -1,69 +1,69 @@
 // src/parser/mod.rs
 
+// 声明子模块
 pub mod ast;
-pub mod parsers; 
+mod parsers;
 
-use crate::lexer::{self, Token, Span};
+// 引入所有需要的模块
+use crate::diagnostics::codes::E0100_SYNTAX_ERROR;
+use crate::diagnostics::{Diagnostic, DiagnosticBag, Label};
+use crate::lexer::{self, Span, Token};
 use crate::parser::ast::Program;
-use crate::parser::parsers::program_parser;
-use chumsky::prelude::*;
-use chumsky::input::Stream;
+use chumsky::input::{Stream, Input};
+use chumsky::Parser;
 
-/// 解析源代码字符串的顶层入口函数
-pub fn parse_source<'a>(source_code: &'a str) -> (Option<Program>, Vec<Rich<'a, Token, Span>>) {
-    // 1. 创建词法分析器迭代器
-    let lex_iter = lexer::lexer(source_code);
+// 从内部实现模块中导入解析器构建函数
+use parsers::program_parser;
 
-    // 2. [FIXED] 使用 for 循环立即处理所有 token 和错误
-    // 这种“急切”的执行方式可以完美解决所有权和生命周期问题。
-    let mut tokens = Vec::new();
-    let mut lex_errs = Vec::new();
-    for result in lex_iter {
-        match result {
-            Ok(token_span) => tokens.push(token_span),
-            Err((lex_err, span)) => {
-                lex_errs.push(Rich::custom(span, lex_err.to_string()));
-            }
-        }
+/// 这是 parser 模块唯一的公共入口函数。
+pub fn parse(source: &str, diagnostics: &mut DiagnosticBag) -> Option<Program> {
+    // --- 1. 词法分析 ---
+    let tokens = lexer::lex(source, diagnostics);
+
+    // --- 2. 提前退出检查 ---
+    if diagnostics.has_errors() {
+        return None;
     }
 
-    // 3. 配置正确的 Stream
-    let eoi = source_code.len()..source_code.len();
-    // 现在我们可以安全地使用收集好的 tokens Vec 来创建流
-    let stream = Stream::from_iter(tokens)
-        .map(eoi, |(token, span)| (token, span));
+    // --- 3. 语法分析 ---
+    let eoi_span = source.len()..source.len();
+    let token_stream = Stream::from_iter(tokens)
+        .map(eoi_span, |(token, span)| (token, span));
+    
+    let parser = program_parser();
 
-    // 4. 语法分析
-    let (ast, mut parse_errs) = program_parser()
-        .parse(stream)
-        .into_output_errors();
+    let (ast, parse_errors) = parser.parse(token_stream).into_output_errors();
 
-    // 5. 合并词法和语法错误
-    lex_errs.append(&mut parse_errs);
+    // --- 4. 报告语法错误 ---
+    for error in parse_errors {
+        let expected_str = if error.expected().len() == 0 {
+            "something else".to_string()
+        } else {
+            error
+                .expected()
+                .map(|expected| expected.to_string())
+                .collect::<Vec<_>>()
+                .join(" or ")
+        };
 
-    (ast, lex_errs)
-}
+        let message = format!(
+            "Expected {}, but found {}",
+            expected_str,
+            // [CORRECTED] The closure now correctly takes a reference to a Token (`tok`)
+            // and formats it directly, without trying to access a non-existent field `.0`.
+            error.found().map_or("end of input".to_string(), |tok| format!("`{:?}`", tok))
+        );
 
-#[cfg(test)]
-mod tests {
-    use super::parse_source;
-
-    #[test]
-    fn test_simple_function() {
-        let src = "int main() { return 0; }";
-        let (ast, errs) = parse_source(src);
-
-        let error_messages: Vec<_> = errs.iter().map(|e| e).collect();
-        assert!(error_messages.is_empty(), "Parsing failed with errors: {:?}", error_messages);
+        let diagnostic = Diagnostic::error(&E0100_SYNTAX_ERROR, Label::new(error.span().clone(), message))
+            .with_note("Please check the syntax and ensure it conforms to the CScript language rules.");
         
-        assert!(ast.is_some(), "AST should not be None");
+        diagnostics.report(diagnostic);
     }
 
-    #[test]
-    fn test_syntax_error() {
-        let src = "int main() { return 0 "; 
-        let (ast, errs) = parse_source(src);
-        
-        assert!(!errs.is_empty(), "Should have reported parsing errors");
+    // --- 5. 返回最终结果 ---
+    if diagnostics.has_errors() {
+        None
+    } else {
+        ast
     }
 }

@@ -1,15 +1,14 @@
 // src/main.rs
 
-use cscript::{parser, analyzer, codegen};
+// [MODIFIED] 引入所有需要的模块，特别是我们新的诊断系统
+use cscript::analyzer::Analyzer;
+use cscript::codegen;
+use cscript::diagnostics::DiagnosticBag;
+use cscript::parser;
 use clap::Parser;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
-
-use ariadne::{Color, Label, Report, ReportKind, Source};
-use chumsky::error::Rich;
-use cscript::lexer::{Span, Token};
-use cscript::analyzer::main::Analyzer;
+use std::process::{self, Command};
 
 /// 一个用 Rust 编写的、基于 LLVM 的 C 语言编译器
 #[derive(Parser, Debug)]
@@ -19,7 +18,7 @@ struct Cli {
     input_file: String,
 
     /// 输出文件的路径。
-    /// [UPDATED] 如果不提供，将根据输入文件名自动生成 (例如: test.c -> test)
+    /// 如果不提供，将根据输入文件名自动生成 (例如: test.c -> test)
     #[arg(short, long)]
     output_file: Option<String>,
 
@@ -28,75 +27,70 @@ struct Cli {
     emit_llvm: bool,
 }
 
-fn print_parse_errors(source_name: &str, source_code: &str, parse_errs: Vec<Rich<Token, Span>>) -> std::io::Result<()> {
-    for e in parse_errs {
-        let span = (source_name, e.span().clone());
-        Report::build(ReportKind::Error, span.clone())
-            .with_code(3)
-            .with_message(e.reason().to_string())
-            .with_label(
-                Label::new(span)
-                    .with_message(e.reason().to_string())
-                    .with_color(Color::Red),
-            )
-            .finish()
-            .eprint((source_name, Source::from(source_code)))?;
-    }
-    Ok(())
-}
+// [REMOVED] 旧的、手动的错误打印函数已被 DiagnosticBag::print() 取代，不再需要。
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let input_path = Path::new(&cli.input_file);
     let source_name = input_path.to_str().unwrap_or("unknown_file");
 
-    // [ADDED] 动态决定输出文件名
+    // 动态决定输出文件名
     let output_path = match cli.output_file {
-        // 如果用户通过 -o 提供了文件名，则使用它
         Some(path) => path,
-        // 否则，根据输入文件名生成默认名
-        None => {
-            input_path
-                .file_stem() // 获取文件名（不含扩展名），例如 "test.c" -> "test"
-                .and_then(|s| s.to_str()) // 转换为 &str
-                .map(|s| s.to_string()) // 转换为 String
-                .unwrap_or_else(|| "a.out".to_string()) // 如果失败，则使用 "a.out" 作为后备
-        }
+        None => input_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "a.out".to_string()),
     };
 
     let source_code = fs::read_to_string(input_path)
         .map_err(|e| format!("Failed to read file '{}': {}", cli.input_file, e))?;
 
-    let (ast, parse_errs) = parser::parse_source(&source_code);
+    // --- [NEW] 统一的编译管道 ---
 
-    if !parse_errs.is_empty() {
-        print_parse_errors(source_name, &source_code, parse_errs)?;
-        return Err("Parsing failed.".into());
-    }
-    
-    let ast = ast.unwrap();
+    // 1. 创建“诊断背包”，它将收集所有阶段的错误
+    let mut diagnostics = DiagnosticBag::new(&source_code);
 
-    let mut analyzer = Analyzer::new();
-    let hir = match analyzer.analyze(&ast) {
-        Ok(hir) => hir,
-        Err(semantic_errs) => {
-            eprintln!("Semantic Analysis Errors:");
-            for e in semantic_errs {
-                 eprintln!("- {:?}", e);
-            }
-            return Err("Semantic analysis failed.".into());
+    // 2. 语法分析 (同时包含了词法分析)
+    // parser::parse 会处理词法和语法错误，并将它们报告给 diagnostics。
+    let ast = match parser::parse(&source_code, &mut diagnostics) {
+        Some(ast) => ast,
+        None => {
+            // 如果 parse 返回 None，说明有错误发生
+            eprintln!("Compilation failed during parsing.");
+            diagnostics.print(source_name); // 打印所有收集到的错误
+            process::exit(1); // 退出
         }
     };
 
-    let llvm_ir = codegen::codegen(&hir)
-        .map_err(|e| format!("CodeGen failed: {:?}", e))?;
+    // 3. 语义分析
+    let mut analyzer = Analyzer::new();
+    let hir = match analyzer.analyze(&ast, &mut diagnostics) {
+        Some(hir) => hir,
+        None => {
+            eprintln!("Compilation failed during semantic analysis.");
+            diagnostics.print(source_name);
+            process::exit(1);
+        }
+    };
+
+    // 4. 代码生成
+    let llvm_ir = match codegen::codegen(&hir, &mut diagnostics) {
+        Some(ir) => ir,
+        None => {
+            eprintln!("Compilation failed during code generation.");
+            diagnostics.print(source_name);
+            process::exit(1);
+        }
+    };
+
+    // --- 如果编译成功，则继续执行后续步骤 ---
 
     if cli.emit_llvm {
-        // [UPDATED] 使用我们动态生成的输出路径
         fs::write(&output_path, llvm_ir)?;
         println!("Successfully generated LLVM IR at '{}'", output_path);
     } else {
-        // [UPDATED] 使用我们动态生成的输出路径
         let temp_ll_file = format!("{}.ll", output_path);
         fs::write(&temp_ll_file, llvm_ir)?;
 
@@ -104,10 +98,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let clang_status = Command::new("clang")
             .arg(&temp_ll_file)
             .arg("-o")
-            .arg(&output_path) // 输出最终的可执行文件
+            .arg(&output_path)
             .status()?;
 
         if !clang_status.success() {
+            // 如果 clang 失败，也将其视为一个错误
             return Err(format!("Clang failed with status: {}", clang_status).into());
         }
 

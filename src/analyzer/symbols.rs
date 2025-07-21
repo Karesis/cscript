@@ -60,9 +60,6 @@ impl SymbolTable {
 
     /// 查找一个符号（从内到外）
     pub fn lookup_symbol(&self, name: &Ident) -> Option<&SymbolInfo> {
-        // [DEBUG] 添加打印日志
-        println!("[Debug] Looking up symbol: '{}'", name.name);
-        println!("[Debug] Current scope depth: {}", self.scopes.len());
         for scope in self.scopes.iter().rev() {
             if let Some(info) = scope.get(&name.name) {
                 return Some(info);

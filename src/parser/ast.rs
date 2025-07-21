@@ -99,7 +99,7 @@ pub enum ExprKind {
         right: Box<Expression>,
     },
     Assignment {
-        left: Box<Expression>, // Must be an l-value
+        left: Box<Expression>, 
         right: Box<Expression>,
     },
     FunctionCall {

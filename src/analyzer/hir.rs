@@ -2,9 +2,9 @@
 
 use crate::parser::ast::{self, UnaryOp, BinaryOp, Ident};
 use crate::lexer::Span;
-use crate::analyzer::types::SemanticType; // [FIXED] 导入新的类型名
+use crate::analyzer::types::SemanticType; 
 use std::sync::Arc;
-use std::hash::{Hash, Hasher}; // 需要导入 Hash 和 Hasher
+use std::hash::{Hash, Hasher}; 
 
 // =======================================================================
 // 核心“注解”信息

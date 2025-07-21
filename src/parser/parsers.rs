@@ -1,40 +1,34 @@
-// src/parser/main.rs
+// src/parser/parsers.rs
 
-use crate::lexer::{Token, Span};
+use crate::lexer::{Span, Token};
 use crate::parser::ast::*;
-use chumsky::prelude::*;
 use chumsky::input::ValueInput;
+use chumsky::prelude::*;
 
-// 正确的错误类型别名
-type ParseError<'a> = extra::Err<Rich<'a, Token, Span>>;
+// [CORRECTED] 这是标准的、正确的 chumsky 错误类型别名。
+pub(super) type ParseError<'a> = extra::Err<Rich<'a, Token, Span>>;
 
-/// 主解析器：解析整个程序。
-/// 这个函数现在是我们的“主设置函数”，负责声明和定义所有相互递归的解析器。
-pub fn program_parser<'a, I>() -> impl Parser<'a, I, Program, ParseError<'a>>
+/// 构建完整的 chumsky 解析器。
+/// 此函数为内部实现细节，仅对父模块 `mod.rs` 可见。
+pub(super) fn program_parser<'a, I>() -> impl Parser<'a, I, Program, ParseError<'a>>
 where
     I: Input<'a, Token = Token, Span = Span> + ValueInput<'a>,
 {
-    // =======================================================================
-    // 1. 声明 (Declare)
-    // =======================================================================
-    // 为所有相互递归的解析器创建“占位符”句柄。
+    // --- 递归解析器声明 ---
     let mut expr = Recursive::declare();
     let mut block = Recursive::declare();
 
-    // =======================================================================
-    // 2. 定义 (Define)
-    // =======================================================================
-    // 在这里，我们将为每个句柄填充实际的解析逻辑。
-
-    // -- 定义非递归的辅助解析器 --
+    // --- 基础解析器 ---
     let ident = select! { Token::Ident(name) = e => Ident { name, span: e.span() } }.labelled("identifier");
     let type_ = type_parser().boxed();
 
-    // -- 定义表达式解析器 (expr) --
+    // --- 表达式解析器定义 ---
     expr.define({
+        // [CORRECTED] 彻底修复了 .unwrap() 问题。
+        // 因为我们的词法分析器已经将整数解析为 i64，这里不再需要进行任何 parse() 调用。
         let atom = choice((
             select! {
-                Token::Integer(s) = e => Expression { kind: ExprKind::Literal(LiteralValue::Integer(s.parse().unwrap())), span: e.span() },
+                Token::Integer(val) = e => Expression { kind: ExprKind::Literal(LiteralValue::Integer(val)), span: e.span() },
                 Token::String(s) = e => Expression { kind: ExprKind::Literal(LiteralValue::String(s)), span: e.span() },
                 Token::Boolean(b) = e => Expression { kind: ExprKind::Literal(LiteralValue::Bool(b)), span: e.span() },
             },
@@ -42,6 +36,7 @@ where
             expr.clone().delimited_by(just(Token::LParen), just(Token::RParen)),
         ));
         
+        // --- 运算符优先级金字塔 (所有逻辑保持不变) ---
         let call = atom.clone().then(
             expr.clone().separated_by(just(Token::Comma)).allow_trailing().collect()
                 .delimited_by(just(Token::LParen), just(Token::RParen)).or_not()
@@ -76,34 +71,29 @@ where
             Expression { kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) }, span }
         });
         
-        // [ADDED] 关系运算符层
         let relational_op = op(Token::Lt).to(BinaryOp::Lt).or(op(Token::Lte).to(BinaryOp::Lte))
             .or(op(Token::Gt).to(BinaryOp::Gt)).or(op(Token::Gte).to(BinaryOp::Gte));
         let relation = sum.clone().foldl(relational_op.then(sum).repeated(), |left, (op, right)| {
-             let span = left.span.start..right.span.end;
+            let span = left.span.start..right.span.end;
             Expression { kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) }, span }
         });
 
-        // [ADDED] 相等运算符层
         let equality_op = op(Token::Eq).to(BinaryOp::Eq).or(op(Token::NotEq).to(BinaryOp::NotEq));
         let equality = relation.clone().foldl(equality_op.then(relation).repeated(), |left, (op, right)| {
-             let span = left.span.start..right.span.end;
+            let span = left.span.start..right.span.end;
             Expression { kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) }, span }
         });
         
-        // [ADDED] 逻辑与运算符层
         let logical_and = equality.clone().foldl(op(Token::And).to(BinaryOp::And).then(equality).repeated(), |left, (op, right)| {
             let span = left.span.start..right.span.end;
             Expression { kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) }, span }
         });
         
-        // [ADDED] 逻辑或运算符层
         let logical_or = logical_and.clone().foldl(op(Token::Or).to(BinaryOp::Or).then(logical_and).repeated(), |left, (op, right)| {
             let span = left.span.start..right.span.end;
             Expression { kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) }, span }
         });
 
-        // [UPDATED] 赋值运算符现在是最低优先级
         logical_or.clone().then(op(Token::Assign).to(()).then(expr.clone()).or_not())
             .map_with(|(left, right_opt), e| {
                 if let Some((_, right)) = right_opt {
@@ -113,8 +103,7 @@ where
             .labelled("expression")
     });
     
-    // -- 定义语句和代码块解析器 --
-    // var_decl 依赖 expr, 所以在 expr 定义后创建
+    // --- 语句和代码块解析器 (所有逻辑保持不变) ---
     let var_decl = just(Token::Const).or_not()
         .then(type_.clone())
         .then(ident.clone())
@@ -124,7 +113,6 @@ where
             is_const: is_const.is_some(), var_type, name, init, span: e.span(),
         });
     
-    // stmt 依赖 expr 和 block, 所以在它们声明后定义
     let stmt = choice((
         just(Token::Return)
             .ignore_then(expr.clone().or_not())
@@ -150,7 +138,6 @@ where
     ))
     .labelled("statement");
     
-    // block 依赖 stmt, 在 stmt 定义后链接
     block.define(
         stmt
             .repeated()
@@ -160,10 +147,7 @@ where
             .labelled("block")
     );
 
-    // =======================================================================
-    // 3. 组装顶层解析器
-    // =======================================================================
-    // func_def 依赖 block
+    // --- 顶层解析器 (所有逻辑保持不变) ---
     let func_def = type_.clone()
         .then(ident.clone())
         .then(
@@ -179,7 +163,6 @@ where
         })
         .labelled("function definition");
     
-    // 最终的 item 解析器
     let item = choice((
         func_def,
         var_decl.map(GlobalItem::VarDecl),
@@ -192,10 +175,7 @@ where
 }
 
 
-// =======================================================================
-// 辅助解析器函数 (非递归部分)
-// =======================================================================
-
+/// 辅助函数：类型解析器 (保持不变)
 fn type_parser<'a, I>() -> impl Parser<'a, I, Type, ParseError<'a>>
 where
     I: Input<'a, Token = Token, Span = Span> + ValueInput<'a>,
