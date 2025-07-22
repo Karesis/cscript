@@ -10,9 +10,9 @@ use crate::parser::ast::{BinaryOp, LiteralValue, UnaryOp};
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
-use inkwell::module::Module;
+use inkwell::module::{Module, Linkage};
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
-use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, PointerValue};
+use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, PointerValue, GlobalValue};
 use inkwell::{AddressSpace, IntPredicate};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -49,6 +49,7 @@ pub struct CodeGen<'ctx> {
     module: Module<'ctx>,
     builder: Builder<'ctx>,
     functions: HashMap<String, FunctionValue<'ctx>>,
+    global_variables: HashMap<Arc<hir::VarDecl>, GlobalValue<'ctx>>,
     variables: HashMap<Arc<hir::VarDecl>, PointerValue<'ctx>>,
     current_function: Option<FunctionValue<'ctx>>,
     loop_stack: Vec<(BasicBlock<'ctx>, BasicBlock<'ctx>)>,
@@ -63,6 +64,7 @@ impl<'ctx> CodeGen<'ctx> {
             module,
             builder,
             functions: HashMap::new(),
+            global_variables: HashMap::new(), 
             variables: HashMap::new(),
             current_function: None,
             loop_stack: Vec::new(),
@@ -71,6 +73,11 @@ impl<'ctx> CodeGen<'ctx> {
 
     /// [REFACTORED] 主入口函数，使用 DiagnosticBag 并返回 Option。
     pub fn run(&mut self, program: &hir::Program, diagnostics: &mut DiagnosticBag) -> Option<String> {
+        // --- PASS 0: 全局变量定义 ---
+        for global_var in &program.globals {
+            self.codegen_global_variable(global_var, diagnostics)?;
+        }
+
         // --- PASS 1: 函数声明 ---
         for func in &program.functions {
             self.codegen_function_declaration(func, diagnostics)?;
@@ -81,20 +88,46 @@ impl<'ctx> CodeGen<'ctx> {
             self.codegen_function_body(func, diagnostics)?;
         }
 
-        // 验证整个模块
         if let Err(e) = self.module.verify() {
-            diagnostics.report(
-                CodeGenError::LLVMVerificationFailed { message: e.to_string() }.into(),
-            );
+            diagnostics.report(CodeGenError::LLVMVerificationFailed { message: e.to_string() }.into());
             return None;
         }
 
-        // 如果在整个过程中报告了任何错误，则最终失败。
         if diagnostics.has_errors() {
             None
         } else {
             Some(self.module.print_to_string().to_string())
         }
+    }
+
+    // [NEW] 新增一个专门用于生成全局变量的函数
+    fn codegen_global_variable(
+        &mut self,
+        var_decl: &Arc<hir::VarDecl>,
+        diagnostics: &mut DiagnosticBag,
+    ) -> Option<()> {
+        let llvm_type = self.to_llvm_type(&var_decl.var_type);
+        let global = self.module.add_global(llvm_type, Some(AddressSpace::default()), &var_decl.name.name);
+        
+        // [FIX] 根据变量是否为 const 来设置正确的属性
+        if var_decl.is_const {
+            global.set_linkage(Linkage::Private); // 常量是模块私有的
+            global.set_constant(true);           // 明确标记为常量
+        } else {
+            global.set_linkage(Linkage::External); // 可变全局变量是外部可见的
+            global.set_constant(false);
+        }
+
+        // 初始化器逻辑保持不变，但现在它会在正确的链接类型下工作
+        if let Some(initializer) = &var_decl.initializer {
+            let init_val = self.visit_const_expression(initializer, diagnostics)?;
+            global.set_initializer(&init_val);
+        } else {
+            global.set_initializer(&llvm_type.const_zero());
+        }
+
+        self.global_variables.insert(var_decl.clone(), global);
+        Some(())
     }
 
     /// [REFACTORED] PASS 1: 只声明函数原型。
@@ -155,8 +188,33 @@ impl<'ctx> CodeGen<'ctx> {
         Some(())
     }
 
-    // ... 其他 visit_... 方法也需要相应地修改 ...
-    // 为了让你快速推进，下面是所有 visit 方法的完整重构版本
+    // [NEW] 新增一个用于处理编译期常量表达式的函数
+    fn visit_const_expression(
+        &self,
+        expr: &hir::Expression,
+        diagnostics: &mut DiagnosticBag,
+    ) -> Option<BasicValueEnum<'ctx>> {
+        match &expr.kind {
+            hir::ExprKind::Literal(literal) => match literal {
+                LiteralValue::Integer(val) => Some(self.context.i32_type().const_int(*val as u64, true).into()),
+                LiteralValue::Bool(b) => Some(self.context.bool_type().const_int(if *b { 1 } else { 0 }, false).into()),
+                _ => {
+                    diagnostics.report(CodeGenError::InternalError {
+                        message: "Only integer and boolean literals are supported as global initializers".to_string(),
+                        span: Some(expr.span.clone()),
+                    }.into());
+                    None
+                }
+            },
+            _ => {
+                diagnostics.report(CodeGenError::InternalError {
+                    message: "Global variable initializers must be constant expressions".to_string(),
+                    span: Some(expr.span.clone()),
+                }.into());
+                None
+            }
+        }
+    }
 
     fn to_llvm_type(&self, ty: &SemanticType) -> BasicTypeEnum<'ctx> {
         match ty {
@@ -198,6 +256,10 @@ impl<'ctx> CodeGen<'ctx> {
 
     fn visit_statement(&mut self, stmt: &hir::Statement, diagnostics: &mut DiagnosticBag) -> Option<()> {
         match stmt {
+            hir::Statement::Block(block) => {
+                // 递归地访问这个嵌套的块，`?` 会处理可能的错误。
+                self.visit_block(block, diagnostics)?;
+            }
             hir::Statement::Return { value, .. } => {
                 if let Some(expr) = value {
                     let llvm_value = self.visit_expression(expr, diagnostics)?;
@@ -288,9 +350,11 @@ impl<'ctx> CodeGen<'ctx> {
                 LiteralValue::String(s) => Some(self.builder.build_global_string_ptr(s, "str_literal").unwrap().as_pointer_value().into()),
             },
             hir::ExprKind::Variable(var_decl) => {
-                let var_ptr = self.variables.get(var_decl)?;
+                // 使用已经统一的 l-value 访问逻辑来获取变量地址
+                let var_ptr = self.visit_lvalue(expr, diagnostics)?;
                 let var_type = self.to_llvm_type(&var_decl.var_type);
-                Some(self.builder.build_load(var_type, *var_ptr, &var_decl.name.name).unwrap())
+                // 从地址中加载值
+                Some(self.builder.build_load(var_type, var_ptr, &var_decl.name.name).unwrap())
             }
             hir::ExprKind::UnaryOp { op, right } => {
                 let right_val = self.visit_expression(right, diagnostics)?;
@@ -358,16 +422,37 @@ impl<'ctx> CodeGen<'ctx> {
         }
     }
 
-    fn visit_lvalue(&mut self, expr: &hir::Expression, diagnostics: &mut DiagnosticBag) -> Option<PointerValue<'ctx>> {
+    // [REFACTORED] visit_lvalue 现在会同时查找局部和全局变量
+    fn visit_lvalue(
+        &mut self,
+        expr: &hir::Expression,
+        diagnostics: &mut DiagnosticBag,
+    ) -> Option<PointerValue<'ctx>> {
         match &expr.kind {
             hir::ExprKind::Variable(var_decl) => {
-                self.variables.get(var_decl).cloned()
+                // 1. 首先在局部变量/参数中查找
+                if let Some(ptr) = self.variables.get(var_decl) {
+                    return Some(*ptr);
+                }
+                // 2. 如果找不到，再去全局变量中查找
+                if let Some(global) = self.global_variables.get(var_decl) {
+                    return Some(global.as_pointer_value());
+                }
+                // 3. 如果都找不到，这是一个内部错误
+                diagnostics.report(CodeGenError::InternalError {
+                    message: format!("Variable '{}' pointer not found in any map", var_decl.name.name),
+                    span: Some(expr.span.clone()),
+                }.into());
+                None
             }
             hir::ExprKind::Dereference(ptr_expr) => {
                 Some(self.visit_expression(ptr_expr, diagnostics)?.into_pointer_value())
             }
             _ => {
-                diagnostics.report(CodeGenError::InternalError { message: "Invalid l-value".to_string(), span: Some(expr.span.clone()) }.into());
+                diagnostics.report(CodeGenError::InternalError {
+                    message: "Invalid l-value".to_string(),
+                    span: Some(expr.span.clone()),
+                }.into());
                 None
             }
         }

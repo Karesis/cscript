@@ -42,6 +42,7 @@ pub struct Block {
 /// Any valid statement in the language.
 #[derive(Debug, Clone)]
 pub enum Statement {
+    Block(Block),
     VarDecl(VarDecl),
     Expr(Expression),
     If {

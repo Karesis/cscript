@@ -42,6 +42,7 @@ pub struct Block {
 
 #[derive(Debug)]
 pub enum Statement {
+    Block(Block),
     VarDecl(Arc<VarDecl>),
     Expr(Expression),
     If {

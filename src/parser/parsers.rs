@@ -114,6 +114,7 @@ where
         });
     
     let stmt = choice((
+        block.clone().map(Statement::Block),
         just(Token::Return)
             .ignore_then(expr.clone().or_not())
             .then_ignore(just(Token::Semicolon))

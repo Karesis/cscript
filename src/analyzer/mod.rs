@@ -87,22 +87,37 @@ impl Analyzer {
                     }
                 }
                 ast::GlobalItem::VarDecl(var_decl) => {
+                    // 从符号表中获取在 Pass 1 中创建的原始 Arc
                     if let Some(SymbolInfo::Variable { decl }) = self.symbol_table.lookup_symbol(&var_decl.name) {
-                        let mut decl_clone = (**decl).clone();
-                        
+                        // 复制原始 Arc 中的数据，以便修改
+                        let mut decl_data = (**decl).clone();
+
+                        // 像以前一样，分析初始化表达式
                         if let Some(init) = &var_decl.init {
                             if let Some(hir_init) = self.visit_expression(init, diagnostics) {
-                                if hir_init.resolved_type != decl_clone.var_type {
+                                // ... 类型检查 ...
+                                if hir_init.resolved_type != decl_data.var_type {
                                     diagnostics.report(SemanticError::TypeMismatch {
-                                        expected: decl_clone.var_type.clone(),
+                                        expected: decl_data.var_type.clone(),
                                         found: hir_init.resolved_type.clone(),
                                         span: init.span.clone(),
                                     }.into());
                                 }
-                                decl_clone.initializer = Some(hir_init);
+                                decl_data.initializer = Some(hir_init);
                             }
                         }
-                        hir_globals.push(Arc::new(decl_clone));
+
+                        // 创建最终的、包含所有信息的 Arc (这是我们唯一的“身份证”)
+                        let final_decl_arc = Arc::new(decl_data);
+                        
+                        // 将这张最终的“身份证”放入全局变量列表
+                        hir_globals.push(final_decl_arc.clone());
+
+                        // [CRITICAL FIX] 用这张最终的“身份证”去更新符号表！
+                        self.symbol_table.update_symbol(
+                            &var_decl.name,
+                            SymbolInfo::Variable { decl: final_decl_arc },
+                        );
                     }
                 }
             }
@@ -187,6 +202,12 @@ impl Analyzer {
         diagnostics: &mut DiagnosticBag,
     ) -> Option<hir::Statement> {
         match stmt {
+            ast::Statement::Block(block) => {
+                // 递归地访问这个嵌套的块。
+                let hir_block = self.visit_block(block, diagnostics)?;
+                // 将分析后的块包装成一个 HIR 语句。
+                Some(hir::Statement::Block(hir_block))
+            }
             ast::Statement::VarDecl(var_decl) => {
                 let var_type = self.resolve_ast_type(&var_decl.var_type);
                 let mut hir_initializer = None;
@@ -340,35 +361,60 @@ impl Analyzer {
             },
             ast::ExprKind::UnaryOp { op, right } => {
                 let hir_right = self.visit_expression(right, diagnostics)?;
-                let resolved_type = match op {
-                    UnaryOp::Negate => {
-                        if !matches!(hir_right.resolved_type, SemanticType::Int { .. }) {
-                            diagnostics.report(SemanticError::TypeMismatch{ expected: SemanticType::Int{width: 32, is_signed: true}, found: hir_right.resolved_type.clone(), span: right.span.clone() }.into());
-                        }
-                        hir_right.resolved_type.clone()
-                    }
-                    UnaryOp::Not => {
-                        if hir_right.resolved_type != SemanticType::Bool {
-                            diagnostics.report(SemanticError::TypeMismatch{ expected: SemanticType::Bool, found: hir_right.resolved_type.clone(), span: right.span.clone() }.into());
-                        }
-                        SemanticType::Bool
-                    }
+
+                // 我们不再只计算类型，而是直接构建出正确的 HIR 节点种类和类型
+                match op {
                     UnaryOp::AddressOf => {
+                        // 检查是否是合法的左值
                         match &hir_right.kind {
-                            hir::ExprKind::Variable(_) | hir::ExprKind::Dereference(_) => {},
+                            hir::ExprKind::Variable(_) | hir::ExprKind::Dereference(_) => {}
                             _ => diagnostics.report(SemanticError::InvalidLValue(hir_right.span.clone()).into()),
                         }
-                        SemanticType::Ptr(Arc::new(hir_right.resolved_type.clone()))
+                        // 计算出指针类型
+                        let resolved_type = SemanticType::Ptr(Arc::new(hir_right.resolved_type.clone()));
+                        // 创建特化的 AddressOf 节点
+                        let kind = hir::ExprKind::AddressOf(Box::new(hir_right));
+                        Some(hir::Expression { kind, span: expr.span.clone(), resolved_type })
                     }
-                    UnaryOp::Dereference => match &hir_right.resolved_type {
-                        SemanticType::Ptr(base) => (**base).clone(),
-                        _ => {
-                            diagnostics.report(SemanticError::TypeMismatch{ expected: SemanticType::Ptr(Arc::new(SemanticType::Void)), found: hir_right.resolved_type.clone(), span: right.span.clone() }.into());
-                            SemanticType::Void 
-                        }
+                    UnaryOp::Dereference => {
+                        // 检查操作数是否是指针
+                        let resolved_type = match &hir_right.resolved_type {
+                            SemanticType::Ptr(base) => (**base).clone(),
+                            _ => {
+                                diagnostics.report(SemanticError::TypeMismatch{ 
+                                    expected: SemanticType::Ptr(Arc::new(SemanticType::Void)), // 用 Void 作为占位符
+                                    found: hir_right.resolved_type.clone(), 
+                                    span: right.span.clone() 
+                                }.into());
+                                SemanticType::Void // 返回一个虚拟类型以尝试继续分析
+                            }
+                        };
+                        // 创建特化的 Dereference 节点
+                        let kind = hir::ExprKind::Dereference(Box::new(hir_right));
+                        Some(hir::Expression { kind, span: expr.span.clone(), resolved_type })
                     }
-                };
-                Some(hir::Expression { kind: hir::ExprKind::UnaryOp { op: op.clone(), right: Box::new(hir_right) }, span: expr.span.clone(), resolved_type })
+                    // 对于其他普通的一元运算符
+                    _ => {
+                        let resolved_type = match op {
+                            UnaryOp::Negate => {
+                                if !matches!(hir_right.resolved_type, SemanticType::Int { .. }) {
+                                    diagnostics.report(SemanticError::TypeMismatch{ expected: SemanticType::Int{width: 32, is_signed: true}, found: hir_right.resolved_type.clone(), span: right.span.clone() }.into());
+                                }
+                                hir_right.resolved_type.clone()
+                            }
+                            UnaryOp::Not => {
+                                if hir_right.resolved_type != SemanticType::Bool {
+                                    diagnostics.report(SemanticError::TypeMismatch{ expected: SemanticType::Bool, found: hir_right.resolved_type.clone(), span: right.span.clone() }.into());
+                                }
+                                SemanticType::Bool
+                            }
+                            _ => unreachable!(), // AddressOf 和 Dereference 已经在上面处理了
+                        };
+                        // 仍然创建通用的 UnaryOp 节点
+                        let kind = hir::ExprKind::UnaryOp { op: op.clone(), right: Box::new(hir_right) };
+                        Some(hir::Expression { kind, span: expr.span.clone(), resolved_type })
+                    }
+                }
             }
             ast::ExprKind::BinaryOp { op, left, right } => {
                 let hir_left = self.visit_expression(left, diagnostics)?;

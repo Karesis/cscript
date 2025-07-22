@@ -69,4 +69,13 @@ impl SymbolTable {
         println!("[Debug] Symbol '{}' not found in any scope.", name.name);
         None
     }
+
+    /// [NEW] 更新一个已存在的符号，或如果不存在则添加它。
+    /// 这在处理全局变量的两遍扫描时非常有用。
+    pub fn update_symbol(&mut self, name: &Ident, info: SymbolInfo) {
+        // 我们假设全局变量总是在最外层作用域
+        if let Some(global_scope) = self.scopes.first_mut() {
+            global_scope.insert(name.name.clone(), info);
+        }
+    }
 }
