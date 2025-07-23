@@ -1,139 +1,139 @@
-CScript: 一个用 Rust 构建的现代编译器
-项目愿景
+CScript: A Modern Compiler Built with Rust
+Project Vision
 
-CScript 起源于一个 C 语言编译器，但它的目标是超越 C。我借鉴 Rust 等现代语言的设计哲学，致力于将 CScript 发展为一门语法现代、类型安全、对开发者友好的系统级编程语言。
+CScript began as a C compiler, but its goal is to transcend C. By borrowing design philosophies from modern languages like Rust, we are committed to evolving CScript into a syntactically modern, type-safe, and developer-friendly systems programming language.
 
-本项目从零开始，使用 Rust 语言和世界一流的编译器工具链构建，目标是达到工业级标准：
+This project is built from scratch in Rust, integrating a world-class toolchain for modern compiler development with the goal of reaching an industrial-grade standard:
 
-    词法分析: logos - 极速的词法分析器生成器。
+    Lexical Analysis: logos - A blazingly fast lexer generator.
 
-    语法分析: chumsky - 表现力强大的解析器组合子库。
+    Syntactic Analysis: chumsky - An expressive and powerful parser combinator library.
 
-    语义分析: 手动实现的访问者模式，拥有上下文驱动的类型确定能力。
+    Semantic Analysis: A hand-written visitor pattern with context-driven type resolution.
 
-    代码生成: inkwell - LLVM 的安全 Rust 封装。
+    Code Generation: inkwell - A safe Rust wrapper for LLVM.
 
-    错误报告: ariadne - 生成美观、精确的编译诊断信息。
+    Error Reporting: ariadne - For generating beautiful and precise compiler diagnostics.
 
-项目目前已经完成了从源代码到原生可执行文件的完整编译流程，并拥有一个健壮的、贯穿始终的错误报告系统。
-编译器当前状态与语言特性
+The project has successfully implemented a complete compilation pipeline from source code to native executables, featuring a robust, end-to-end error reporting system.
+Compiler Status & Language Features
 
-CScript 已经从一个简单的 C 语言子集，演变为拥有自己独特语法的独立语言。核心功能均已实现并通过端到端测试。
-1. 现代语法 (Modern Syntax)
+CScript has evolved from a simple C subset into an independent language with its own unique syntax. All core features are implemented and have passed end-to-end testing.
+1. Modern Syntax
 
-CScript 采用了更清晰、更不易出错的类型后置语法：
+CScript adopts a clearer and less error-prone type-after syntax:
 
-    变量声明: variable_name: type = value;
+    Variable Declarations: variable_name: type = value;
 
     x: i32 = 10;
     PI: f64 = 3.14;
 
-    函数定义: function_name(param: type) -> return_type { ... }
+    Function Definitions: function_name(param: type) -> return_type { ... }
 
     add(a: i32, b: i32) -> i32 {
         return a + b;
     }
 
-2. 丰富的原生类型系统 (Rich Primitive Types)
+2. Rich Primitive Type System
 
-    有符号整数: i8, i16, i32 (或 int), i64
+    Signed Integers: i8, i16, i32 (or int), i64
 
-    无符号整数: u8, u16, u32, u64
+    Unsigned Integers: u8, u16, u32, u64
 
-    浮点数: f32, f64
+    Floating-Point Numbers: f32, f64
 
-    其他类型: char, bool, void
+    Other Types: char, bool, void
 
-    指针: 支持任意层级的指针，例如 i32*, char**。
+    Pointers: Supports pointers to any level, e.g., i32*, char**.
 
-3. 语句 (Statements)
+3. Statements
 
-    变量声明: 支持局部和全局变量的声明与初始化。
+    Variable Declarations: Supports local and global variable declarations with initializers.
 
-    const 限定符。
+    const qualifier.
 
-    控制流:
+    Control Flow:
 
-        if / else 条件语句。
+        if / else conditional statements.
 
-        while 循环语句。
+        while loop statements.
 
-        块语句: 支持任意嵌套的代码块 { ... } 作为独立语句。
+        Block Statements: Supports arbitrarily nested code blocks { ... } as standalone statements.
 
-    跳转语句: return, break, continue。
+    Jump Statements: return, break, continue.
 
-    表达式语句: 任何合法的表达式后加分号。
+    Expression Statements: Any valid expression followed by a semicolon.
 
-4. 表达式 (Expressions)
+4. Expressions
 
-    字面量:
+    Literals:
 
-        整数字面量: 根据上下文确定类型 (e.g., 在 x: u8 = 10; 中, 10 被推断为 u8)。
+        Integer Literals: Type is determined by the context (e.g., in x: u8 = 10;, 10 is inferred as u8).
 
-        浮点数字面量: (e.g., 3.14159)。
+        Float Literals: (e.g., 3.14159).
 
-        布尔字面量 (true, false)。
+        Boolean Literals: true, false.
 
-        字符串字面量 ("hello", 类型为 char*)。
+        String Literals: ("hello", with type char*).
 
-    运算符:
+    Operators:
 
-        算术: +, -, *, /, % (支持整数和浮点数)。
+        Arithmetic: +, -, *, /, % (supports both integers and floats).
 
-        比较: ==, !=, >, <, >=, <= (支持整数和浮点数)。
+        Comparison: ==, !=, >, <, >=, <= (supports both integers and floats).
 
-        逻辑: &&, || (注意：当前为非短路求值)。
+        Logical: &&, || (Note: short-circuiting is not yet implemented).
 
-        一元: - (取反), ! (逻辑非), & (取地址), * (解引用)。
+        Unary: - (negation), ! (logical not), & (address-of), * (dereference).
 
-        赋值: =。
+        Assignment: =.
 
-    函数调用: 支持带参数的函数调用。
+    Function Calls: Supports function calls with arguments.
 
-5. 其他核心特性
+5. Other Core Features
 
-    作用域: 正确处理全局、函数及块级作用域。
+    Scoping: Correctly handles global, function, and block scopes.
 
-    类型安全: 在编译期进行严格的类型检查，包括对数字字面量的溢出检查。
+    Type Safety: Performs strict type checking at compile-time, including overflow checks for numeric literals.
 
-    注释: 支持单行注释 // 和多行注释 /* ... */。
+    Comments: Supports single-line // and multi-line /* ... */ comments.
 
-暂不支持的主要特性
+Major Unsupported Features
 
     struct, union, enum
 
-    数组的声明与访问
+    Array declaration and access
 
-    for 循环 (可以被 while 替代)
+    for loops (can be emulated with while)
 
-    typedef 和类型别名
+    typedef and type aliases
 
-    显式类型转换 (Casts)
+    Explicit type casting
 
-    预处理器
+    A preprocessor
 
-安装
-从源码构建
+Installation
+Build from Source
 
-    确保您已安装 Rust 工具链 和 clang。
+    Ensure you have the Rust toolchain and clang installed.
 
-    克隆本仓库:
+    Clone this repository:
 
     git clone https://github.com/karesis/cscript.git
     cd cscript
 
-    构建 Release 版本的可执行文件:
+    Build the release executable:
 
     cargo build --release
 
-    可执行文件位于 target/release/cscript。
+    The executable will be located at target/release/cscript.
 
-使用方法
+Usage
 
-假设您有一个使用 CScript 新语法的 fib.c 文件：
+Assume you have a fib.c file written in the new CScript syntax:
 
 // fib.c
-// 使用 CScript 的现代语法编写的斐波那契函数
+// A Fibonacci function written in CScript's modern syntax.
 
 fib(n: i32) -> i32 {
     if (n < 2) {
@@ -143,43 +143,43 @@ fib(n: i32) -> i32 {
 }
 
 main() -> i32 {
-    return fib(10); // 结果应该是 55
+    return fib(10); // The result should be 55
 }
 
-编译成可执行文件
+Compile to an Executable
 
-# 默认输出名为 fib
+# The default output name will be 'fib'
 cargo run -- fib.c
 
-# 运行
+# Run the program
 ./fib
-echo $? # 应该输出 55
+echo $? # Should output 55
 
-指定输出文件名
+Specify an Output Filename
 
 cargo run -- fib.c -o my_fib_program
 ./my_fib_program
-echo $? # 应该输出 55
+echo $? # Should output 55
 
-生成 LLVM IR
+Emit LLVM IR
 
-如果您想查看编译器生成的中间代码，可以使用 -S 或 --emit-llvm 标志。
+If you want to inspect the intermediate representation generated by the compiler, use the -S or --emit-llvm flag.
 
 cargo run -- fib.c -S -o fib.ll
 
-这将会生成一个名为 fib.ll 的文本文件，其中包含了 fib.c 对应的 LLVM IR。
-未来计划
+This will generate a text file named fib.ll containing the LLVM IR corresponding to fib.c.
+Future Plans
 
-我的征途是星辰大海！
+Our journey has just begun!
 
-    [ ] 高级数据结构: 实现对 struct 和数组的完整支持。
+    [ ] Advanced Data Structures: Implement full support for struct and arrays.
 
-    [ ] 类型推断: 为变量声明引入 let 关键字，实现 let x = 10; 这样的类型推断。
+    [ ] Type Inference: Introduce the let keyword for variable declarations, enabling inference like let x = 10;.
 
-    [ ] 模块系统: 设计并实现一个简单的文件模块系统。
+    [ ] Module System: Design and implement a simple file-based module system.
 
-    [ ] 优化与性能: 集成更多 LLVM 优化趟 (Optimization Passes)，并对编译器自身进行性能分析。
+    [ ] Optimization & Performance: Integrate more LLVM optimization passes and profile the compiler itself for performance improvements.
 
-    [ ] 语言生态: 探索构建标准库、包管理器等可能性。
+    [ ] Language Ecosystem: Explore the possibility of building a standard library, a package manager, and more.
 
-欢迎任何形式的贡献，让我们一起把 CScript 打造成一门令人兴奋的新语言！
+We welcome contributions of all kinds. Let's build an exciting new language together!
