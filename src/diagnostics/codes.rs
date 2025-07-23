@@ -121,6 +121,22 @@ pub const E0208_ASSIGNMENT_TO_CONST: ErrorCode = ErrorCode {
     explanation: "Variables declared with the `const` qualifier are read-only and cannot be modified after their initial declaration."
 };
 
+pub const E0209_INTEGER_OVERFLOW: ErrorCode = ErrorCode {
+    code: "E0209",
+    level: DiagnosticLevel::Error,
+    message: "Integer literal overflows its target type",
+    explanation: "The value of the integer literal is too large or too small to be represented by the type it is being assigned to. \
+                  For example, trying to assign 256 to a u8 (which has a maximum value of 255)."
+};
+
+pub const E0210_INTERNAL_COMPILER_ERROR: ErrorCode = ErrorCode {
+    code: "E0210",
+    level: DiagnosticLevel::Error,
+    message: "Internal compiler error",
+    explanation: "An unexpected error occurred within the compiler's internal logic. This indicates a bug in the CScript compiler itself. \
+                  Please report this issue with the source code that caused it."
+};
+
 // --- E03xx: Code Generation Errors ---
 
 pub const E0300_LLVM_VERIFICATION_FAILED: ErrorCode = ErrorCode {

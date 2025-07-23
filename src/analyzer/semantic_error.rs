@@ -2,11 +2,7 @@ use super::types::SemanticType;
 use crate::parser::ast::Ident;
 use crate::lexer::Span;
 use crate::diagnostics::{
-    codes::{
-        E0200_SYMBOL_NOT_FOUND, E0201_SYMBOL_ALREADY_EXISTS, E0202_TYPE_MISMATCH,
-        E0203_INVALID_LVALUE, E0204_NOT_A_FUNCTION, E0205_WRONG_ARGUMENT_COUNT,
-        E0206_BREAK_OUTSIDE_LOOP, E0207_CONTINUE_OUTSIDE_LOOP, E0208_ASSIGNMENT_TO_CONST,
-    },
+    codes::*,
     Diagnostic, DiagnosticBag, Label,
 };
 
@@ -17,13 +13,29 @@ use std::fmt::Display;
 pub enum SemanticError {
     SymbolNotFound(Ident),
     SymbolAlreadyExists(Ident),
-    TypeMismatch { expected: SemanticType, found: SemanticType, span: Span },
+    TypeMismatch {
+        expected: SemanticType,
+        found: SemanticType,
+        span: Span,
+    },
     InvalidLValue(Span),
     NotAFunction(Ident),
-    WrongArgumentCount { expected: usize, found: usize, span: Span },
+    WrongArgumentCount {
+        expected: usize,
+        found: usize,
+        span: Span,
+    },
     BreakOutsideLoop(Span),
     ContinueOutsideLoop(Span),
     AssignmentToConst(Span),
+    IntegerOverflow {
+        target_type: SemanticType,
+        span: Span,
+    },
+    InternalError {
+        message: String,
+        span: Option<Span>,
+    },
 }
 // 为了方便打印 SemanticType
 impl Display for SemanticType {
@@ -80,6 +92,22 @@ impl From<SemanticError> for Diagnostic {
                 &E0208_ASSIGNMENT_TO_CONST,
                 Label::new(span, "Cannot assign to a variable declared as `const`"),
             ),
+
+            SemanticError::IntegerOverflow { target_type, span } => Diagnostic::error(
+                &E0209_INTEGER_OVERFLOW,
+                Label::new(span, format!("Value is too large for type `{}`", target_type)),
+            ),
+            
+            SemanticError::InternalError { message, span } => {
+                // 如果有具体的 span，就用它；如果没有，就用一个默认的空 span。
+                let final_span = span.unwrap_or(0..0);
+                let label = Label::new(final_span, &message);
+
+                Diagnostic::error(&E0210_INTERNAL_COMPILER_ERROR, label)
+                    // 使用 with_dynamic_message 来显示具体的内部错误信息，
+                    // 而不是 ErrorCode 中那个通用的 "Internal compiler error"。
+                    .with_dynamic_message(message)
+            }
         }
     }
 }

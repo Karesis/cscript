@@ -1,4 +1,5 @@
 use crate::lexer::Span;
+use std::hash::{Hasher, Hash};
 
 //================================================================//
 // 1. Top-Level Items (The Program)
@@ -134,9 +135,10 @@ pub enum BinaryOp {
     Or 
 }
 
-#[derive(Debug, Clone, PartialEq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)] 
 pub enum LiteralValue {
-    Integer(i64),
+    Integer(String),
+    Float(String),
     String(String),
     Bool(bool),
 }
@@ -148,11 +150,28 @@ pub enum LiteralValue {
 /// A type annotation in the source code.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
-    Int,
+    // 传统类型
+    Int, // 保留为 i32 的别名
     Char,
     Bool,
     Void,
-    Ptr(Box<Type>), // Pointer to another type
+
+    // [NEW] 整数类型
+    I8,
+    I16,
+    I32,
+    I64,
+    U8,
+    U16,
+    U32,
+    U64,
+
+    // [NEW] 浮点数类型
+    F32,
+    F64,
+
+    // 指针类型
+    Ptr(Box<Type>),
 }
 
 /// An identifier, like a variable or function name.

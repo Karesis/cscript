@@ -13,7 +13,7 @@ use inkwell::context::Context;
 use inkwell::module::{Module, Linkage};
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
 use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, PointerValue, GlobalValue};
-use inkwell::{AddressSpace, IntPredicate};
+use inkwell::{AddressSpace, IntPredicate, FloatPredicate};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -188,7 +188,7 @@ impl<'ctx> CodeGen<'ctx> {
         Some(())
     }
 
-    // [NEW] 新增一个用于处理编译期常量表达式的函数
+    /// [CORRECTED] visit_const_expression 现在可以正确处理浮点数常量。
     fn visit_const_expression(
         &self,
         expr: &hir::Expression,
@@ -196,11 +196,18 @@ impl<'ctx> CodeGen<'ctx> {
     ) -> Option<BasicValueEnum<'ctx>> {
         match &expr.kind {
             hir::ExprKind::Literal(literal) => match literal {
-                LiteralValue::Integer(val) => Some(self.context.i32_type().const_int(*val as u64, true).into()),
-                LiteralValue::Bool(b) => Some(self.context.bool_type().const_int(if *b { 1 } else { 0 }, false).into()),
+                hir::LiteralValue::Float(val) => {
+                    let float_type = self.to_llvm_type(&expr.resolved_type).into_float_type();
+                    Some(float_type.const_float(*val).into())
+                }
+                hir::LiteralValue::Integer(val) => {
+                    let int_type = self.to_llvm_type(&expr.resolved_type).into_int_type();
+                    Some(int_type.const_int(*val as u64, true).into())
+                }
+                hir::LiteralValue::Bool(b) => Some(self.context.bool_type().const_int(if *b { 1 } else { 0 }, false).into()),
                 _ => {
                     diagnostics.report(CodeGenError::InternalError {
-                        message: "Only integer and boolean literals are supported as global initializers".to_string(),
+                        message: "Only numeric and boolean literals are supported as global initializers".to_string(),
                         span: Some(expr.span.clone()),
                     }.into());
                     None
@@ -218,11 +225,16 @@ impl<'ctx> CodeGen<'ctx> {
 
     fn to_llvm_type(&self, ty: &SemanticType) -> BasicTypeEnum<'ctx> {
         match ty {
-            SemanticType::Int { .. } => self.context.i32_type().into(),
             SemanticType::Bool => self.context.bool_type().into(),
             SemanticType::Char => self.context.i8_type().into(),
+            SemanticType::Integer { width, .. } => self.context.custom_width_int_type(*width as u32).into(),
+            SemanticType::Float { width } => match width {
+                32 => self.context.f32_type().into(),
+                64 => self.context.f64_type().into(),
+                _ => unreachable!(),
+            },
             SemanticType::Ptr(_) => self.context.ptr_type(AddressSpace::default()).into(),
-            _ => unimplemented!("LLVM type for {:?} is not implemented", ty),
+            _ => unimplemented!("LLVM type for {:?} is not a basic type", ty),
         }
     }
 
@@ -340,26 +352,39 @@ impl<'ctx> CodeGen<'ctx> {
         Some(())
     }
 
-    fn visit_expression(&mut self, expr: &hir::Expression, diagnostics: &mut DiagnosticBag) -> Option<BasicValueEnum<'ctx>> {
-        // ... (visit_expression 的实现也需要按照这个模式进行完整的修改)
-        // 为了让你快速推进，这里我将提供完整的 visit_expression 实现
+    fn visit_expression(
+        &mut self,
+        expr: &hir::Expression,
+        diagnostics: &mut DiagnosticBag,
+    ) -> Option<BasicValueEnum<'ctx>> {
         match &expr.kind {
             hir::ExprKind::Literal(literal) => match literal {
-                LiteralValue::Integer(val) => Some(self.context.i32_type().const_int(*val as u64, false).into()),
-                LiteralValue::Bool(b) => Some(self.context.bool_type().const_int(if *b { 1 } else { 0 }, false).into()),
-                LiteralValue::String(s) => Some(self.builder.build_global_string_ptr(s, "str_literal").unwrap().as_pointer_value().into()),
+                hir::LiteralValue::Float(val) => {
+                    let float_type = self.to_llvm_type(&expr.resolved_type).into_float_type();
+                    Some(float_type.const_float(*val).into())
+                }
+                hir::LiteralValue::Integer(val) => {
+                    let int_type = self.to_llvm_type(&expr.resolved_type).into_int_type();
+                    Some(int_type.const_int(*val as u64, true).into())
+                }
+                hir::LiteralValue::Bool(b) => Some(self.context.bool_type().const_int(if *b { 1 } else { 0 }, false).into()),
+                hir::LiteralValue::String(s) => Some(self.builder.build_global_string_ptr(s, "str").unwrap().as_pointer_value().into()),
             },
-            hir::ExprKind::Variable(var_decl) => {
-                // 使用已经统一的 l-value 访问逻辑来获取变量地址
+
+            hir::ExprKind::Variable(_) => {
                 let var_ptr = self.visit_lvalue(expr, diagnostics)?;
-                let var_type = self.to_llvm_type(&var_decl.var_type);
-                // 从地址中加载值
-                Some(self.builder.build_load(var_type, var_ptr, &var_decl.name.name).unwrap())
+                let var_type = self.to_llvm_type(&expr.resolved_type);
+                Some(self.builder.build_load(var_type, var_ptr, "loadtmp").unwrap())
             }
+
             hir::ExprKind::UnaryOp { op, right } => {
                 let right_val = self.visit_expression(right, diagnostics)?;
                 let result = match op {
-                    UnaryOp::Negate => self.builder.build_int_neg(right_val.into_int_value(), "negtmp").map(Into::into),
+                    UnaryOp::Negate => match right.resolved_type {
+                        SemanticType::Integer { .. } => self.builder.build_int_neg(right_val.into_int_value(), "negtmp").map(Into::into),
+                        SemanticType::Float { .. } => self.builder.build_float_neg(right_val.into_float_value(), "fnegtmp").map(Into::into),
+                        _ => unreachable!(),
+                    },
                     UnaryOp::Not => {
                         let bool_val = right_val.into_int_value();
                         let zero = self.context.bool_type().const_zero();
@@ -369,43 +394,84 @@ impl<'ctx> CodeGen<'ctx> {
                 };
                 Some(result.unwrap())
             }
-            hir::ExprKind::AddressOf(expr_to_addr) => {
-                self.visit_lvalue(expr_to_addr, diagnostics).map(|ptr| ptr.as_basic_value_enum())
-            }
+
+            hir::ExprKind::AddressOf(expr_to_addr) => self.visit_lvalue(expr_to_addr, diagnostics).map(|ptr| ptr.as_basic_value_enum()),
             hir::ExprKind::Dereference(ptr_expr) => {
                 let ptr_val = self.visit_expression(ptr_expr, diagnostics)?.into_pointer_value();
                 let ty = self.to_llvm_type(&expr.resolved_type);
                 Some(self.builder.build_load(ty, ptr_val, "dereftmp").unwrap())
             }
+
             hir::ExprKind::BinaryOp { op, left, right } => {
                 let left_val = self.visit_expression(left, diagnostics)?;
                 let right_val = self.visit_expression(right, diagnostics)?;
-                let result = match op {
-                    BinaryOp::Add => self.builder.build_int_add(left_val.into_int_value(), right_val.into_int_value(), "addtmp").map(Into::into),
-                    BinaryOp::Subtract => self.builder.build_int_sub(left_val.into_int_value(), right_val.into_int_value(), "subtmp").map(Into::into),
-                    BinaryOp::Multiply => self.builder.build_int_mul(left_val.into_int_value(), right_val.into_int_value(), "multmp").map(Into::into),
-                    BinaryOp::Divide => self.builder.build_int_signed_div(left_val.into_int_value(), right_val.into_int_value(), "divtmp").map(Into::into),
-                    BinaryOp::Modulo => self.builder.build_int_signed_rem(left_val.into_int_value(), right_val.into_int_value(), "remtmp").map(Into::into),
-                    op @ (BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::Gt | BinaryOp::Gte | BinaryOp::Lt | BinaryOp::Lte) => {
-                        let predicate = match op {
-                            BinaryOp::Eq => IntPredicate::EQ, BinaryOp::NotEq => IntPredicate::NE,
-                            BinaryOp::Gt => IntPredicate::SGT, BinaryOp::Gte => IntPredicate::SGE,
-                            BinaryOp::Lt => IntPredicate::SLT, BinaryOp::Lte => IntPredicate::SLE,
+
+                match left.resolved_type {
+                    SemanticType::Integer { is_signed, .. } => {
+                        let left_int = left_val.into_int_value();
+                        let right_int = right_val.into_int_value();
+                        let result = match op {
+                            BinaryOp::Add => self.builder.build_int_add(left_int, right_int, "addtmp").map(Into::into),
+                            BinaryOp::Subtract => self.builder.build_int_sub(left_int, right_int, "subtmp").map(Into::into),
+                            BinaryOp::Multiply => self.builder.build_int_mul(left_int, right_int, "multmp").map(Into::into),
+                            BinaryOp::Divide => if is_signed {
+                                self.builder.build_int_signed_div(left_int, right_int, "sdivtmp").map(Into::into)
+                            } else {
+                                self.builder.build_int_unsigned_div(left_int, right_int, "udivtmp").map(Into::into)
+                            },
+                            BinaryOp::Modulo => if is_signed {
+                                self.builder.build_int_signed_rem(left_int, right_int, "sremtmp").map(Into::into)
+                            } else {
+                                self.builder.build_int_unsigned_rem(left_int, right_int, "uremtmp").map(Into::into)
+                            },
+                            op @ (BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::Gt | BinaryOp::Gte | BinaryOp::Lt | BinaryOp::Lte) => {
+                                let predicate = int_predicate(op, is_signed);
+                                self.builder.build_int_compare(predicate, left_int, right_int, "cmptmp").map(Into::into)
+                            }
                             _ => unreachable!(),
                         };
-                        self.builder.build_int_compare(predicate, left_val.into_int_value(), right_val.into_int_value(), "cmptmp").map(Into::into)
+                        Some(result.unwrap())
                     }
-                    BinaryOp::And => self.builder.build_and(left_val.into_int_value(), right_val.into_int_value(), "andtmp").map(Into::into),
-                    BinaryOp::Or => self.builder.build_or(left_val.into_int_value(), right_val.into_int_value(), "ortmp").map(Into::into),
-                };
-                Some(result.unwrap())
+                    SemanticType::Float { .. } => {
+                        let left_float = left_val.into_float_value();
+                        let right_float = right_val.into_float_value();
+                        let result = match op {
+                            BinaryOp::Add => self.builder.build_float_add(left_float, right_float, "faddtmp").map(Into::into),
+                            BinaryOp::Subtract => self.builder.build_float_sub(left_float, right_float, "fsubtmp").map(Into::into),
+                            BinaryOp::Multiply => self.builder.build_float_mul(left_float, right_float, "fmultmp").map(Into::into),
+                            BinaryOp::Divide => self.builder.build_float_div(left_float, right_float, "fdivtmp").map(Into::into),
+                            op @ (BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::Gt | BinaryOp::Gte | BinaryOp::Lt | BinaryOp::Lte) => {
+                                let predicate = float_predicate(op);
+                                self.builder.build_float_compare(predicate, left_float, right_float, "fcmptmp").map(Into::into)
+                            }
+                            _ => {
+                                diagnostics.report(CodeGenError::InternalError { message: format!("Operator {:?} is not supported for floats", op), span: Some(expr.span.clone()) }.into());
+                                return None;
+                            }
+                        };
+                        Some(result.unwrap())
+                    }
+                    SemanticType::Bool => {
+                        let left_bool = left_val.into_int_value();
+                        let right_bool = right_val.into_int_value();
+                        let result = match op {
+                            BinaryOp::And => self.builder.build_and(left_bool, right_bool, "andtmp").map(Into::into),
+                            BinaryOp::Or => self.builder.build_or(left_bool, right_bool, "ortmp").map(Into::into),
+                            _ => unreachable!(),
+                        };
+                        Some(result.unwrap())
+                    }
+                    _ => unreachable!(),
+                }
             }
+            
             hir::ExprKind::Assignment { left, right } => {
                 let ptr_to_store = self.visit_lvalue(left, diagnostics)?;
                 let val_to_store = self.visit_expression(right, diagnostics)?;
                 self.builder.build_store(ptr_to_store, val_to_store).unwrap();
                 Some(val_to_store)
             }
+
             hir::ExprKind::FunctionCall { name, args } => {
                 let function = *self.functions.get(&name.name).unwrap();
                 let mut evaluated_args = Vec::new();
@@ -456,6 +522,32 @@ impl<'ctx> CodeGen<'ctx> {
                 None
             }
         }
+    }
+}
+
+/// 辅助函数，用于将我们的 BinaryOp 转换为 LLVM 的 IntPredicate
+fn int_predicate(op: &BinaryOp, is_signed: bool) -> IntPredicate {
+    match op {
+        BinaryOp::Eq => IntPredicate::EQ,
+        BinaryOp::NotEq => IntPredicate::NE,
+        BinaryOp::Gt => if is_signed { IntPredicate::SGT } else { IntPredicate::UGT },
+        BinaryOp::Gte => if is_signed { IntPredicate::SGE } else { IntPredicate::UGE },
+        BinaryOp::Lt => if is_signed { IntPredicate::SLT } else { IntPredicate::ULT },
+        BinaryOp::Lte => if is_signed { IntPredicate::SLE } else { IntPredicate::ULE },
+        _ => unreachable!(),
+    }
+}
+
+/// 辅助函数，用于将我们的 BinaryOp 转换为 LLVM 的 FloatPredicate
+fn float_predicate(op: &BinaryOp) -> FloatPredicate {
+    match op {
+        BinaryOp::Eq => FloatPredicate::OEQ,
+        BinaryOp::NotEq => FloatPredicate::ONE,
+        BinaryOp::Gt => FloatPredicate::OGT,
+        BinaryOp::Gte => FloatPredicate::OGE,
+        BinaryOp::Lt => FloatPredicate::OLT,
+        BinaryOp::Lte => FloatPredicate::OLE,
+        _ => unreachable!(),
     }
 }
 

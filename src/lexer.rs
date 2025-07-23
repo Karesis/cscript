@@ -71,15 +71,46 @@ pub enum Token {
     #[token("continue")]
     Continue,
 
+    // 有符号整数家族 (i-family)
+    #[token("i8")]
+    I8,
+    #[token("i16")]
+    I16,
+    #[token("i32")]
+    I32,
+    #[token("i64")]
+    I64,
+
+    // 无符号整数家族 (u-family)
+    #[token("u8")]
+    U8,
+    #[token("u16")]
+    U16,
+    #[token("u32")]
+    U32,
+    #[token("u64")]
+    U64,
+
+    // 浮点数家族 (f-family)
+    #[token("f32")]
+    F32,
+    #[token("f64")]
+    F64,
+
     // Literals
     #[token("true", |_| true)]
     #[token("false", |_| false)]
     Boolean(bool), 
-    
+
+    // [MODIFIED] 新增了对浮点数字面量的解析。
+    // logos 会优先尝试匹配这个更具体的规则，然后再尝试匹配整数。
+    #[regex("[0-9]+\\.[0-9]+", |lex| lex.slice().to_string())]
+    Float(String),
+        
     // [REFACTORED] 直接在词法分析阶段将数字字符串解析为 i64。
     // 如果解析失败（例如，数字太大溢出），返回 None，logos 会将其视为一个错误。
-    #[regex("[0-9]+", |lex| lex.slice().parse::<i64>().ok())]
-    Integer(i64),
+    #[regex("[0-9]+", |lex| lex.slice().to_string())]
+    Integer(String),
 
     // [REFACTORED] 使用辅助函数来处理字符串字面量。
     #[regex(r#""([^"\\]|\\.)*""#, lex_string_literal)]
@@ -124,6 +155,10 @@ pub enum Token {
     Ampersand,
     #[token(".")]
     Dot,
+    #[token(":")]      
+    Colon,
+    #[token("->")]     
+    Arrow,
     
     // Delimiters
     #[token("(")]

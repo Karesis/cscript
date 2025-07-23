@@ -1,26 +1,49 @@
 // src/analyzer/hir.rs
 
-use crate::parser::ast::{self, UnaryOp, BinaryOp, Ident};
+use crate::analyzer::types::SemanticType;
 use crate::lexer::Span;
-use crate::analyzer::types::SemanticType; 
+use crate::parser::ast::{BinaryOp, Ident, UnaryOp};
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use std::hash::{Hash, Hasher}; 
 
-// =======================================================================
-// 核心“注解”信息
-// =======================================================================
+#[derive(Debug, Clone, PartialEq)]
+pub enum LiteralValue {
+    Integer(i64),
+    String(String),
+    Bool(bool),
+    Float(f64), // 它现在正确地存储 f64
+}
 
-/// 代表一个变量的存储位置
+impl Hash for LiteralValue {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+        match self {
+            LiteralValue::Integer(i) => i.hash(state),
+            LiteralValue::String(s) => s.hash(state),
+            LiteralValue::Bool(b) => b.hash(state),
+            LiteralValue::Float(f) => {
+                if *f == 0.0 {
+                    0.0f64.to_bits().hash(state);
+                } else if f.is_nan() {
+                    0x7ff8000000000001u64.hash(state);
+                } else {
+                    f.to_bits().hash(state);
+                }
+            }
+        }
+    }
+}
+impl Eq for LiteralValue {}
+
+
+// --- 核心“注解”信息 ---
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub enum Storage {
     Global { name: String },
-    Local { offset: i32 }, 
+    Local { offset: i32 },
 }
 
-// =======================================================================
-// HIR 节点定义
-// =======================================================================
-
+// --- HIR 节点定义 ---
 #[derive(Debug)]
 pub struct Program {
     pub functions: Vec<Function>,
@@ -31,7 +54,7 @@ pub struct Program {
 pub struct Function {
     pub name: Ident,
     pub params: Vec<Arc<VarDecl>>,
-    pub return_type: SemanticType, // [FIXED]
+    pub return_type: SemanticType,
     pub body: Block,
 }
 
@@ -49,55 +72,54 @@ pub enum Statement {
         condition: Expression,
         then_branch: Block,
         else_branch: Option<Block>,
-        span: Span, // [ADDED]
+        span: Span,
     },
     While {
         condition: Expression,
         body: Block,
-        span: Span, // [ADDED]
+        span: Span,
     },
-    Return { // [UPDATED] Changed to a struct to hold the span
+    Return {
         value: Option<Expression>,
         span: Span,
     },
-    Break(Span),      // [UPDATED] Break and Continue can also carry their span
+    Break(Span),
     Continue(Span),
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct VarDecl {
     pub name: Ident,
-    pub var_type: SemanticType, // [FIXED]
+    pub var_type: SemanticType,
     pub is_const: bool,
     pub storage: Storage,
     pub initializer: Option<Expression>,
 }
-// 手动实现 PartialEq, Eq, Hash
-impl PartialEq for Expression {
-    fn eq(&self, other: &Self) -> bool {
-        self.kind == other.kind // 暂时只比较 kind，可以根据需要扩展
-    }
-}
-impl Eq for Expression {}
-
-impl Hash for Expression {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.kind.hash(state); // 暂时只 hash kind
-    }
-}
-
 
 #[derive(Debug, Clone)]
 pub struct Expression {
     pub kind: ExprKind,
     pub span: Span,
-    pub resolved_type: SemanticType, // [FIXED]
+    pub resolved_type: SemanticType,
 }
 
-#[derive(Debug, Clone, PartialEq, Hash)]
+impl PartialEq for Expression {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
+    }
+}
+impl Eq for Expression {}
+impl Hash for Expression {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.kind.hash(state);
+    }
+}
+
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ExprKind {
-    Literal(ast::LiteralValue),
-    Variable(Arc<VarDecl>), 
+    Literal(LiteralValue),
+    Variable(Arc<VarDecl>),
     UnaryOp {
         op: UnaryOp,
         right: Box<Expression>,
