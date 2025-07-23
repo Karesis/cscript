@@ -6,4 +6,6 @@ edition = "2024"
 [dependencies]
 ariadne = "0.5.1"
 chumsky = "0.10.1"
+logos = "0.15.0"
 inkwell = { version = "0.6.0", features = ["llvm18-1"] }
+clap = { version = "4.5.41", features = ["derive"] }
