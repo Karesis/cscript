@@ -41,6 +41,31 @@ impl Analyzer {
         // --- PASS 1: 收集所有全局符号 ---
         for item in &program.items {
             match item {
+                // [NEW] 新增对 extern 块的处理
+                ast::GlobalItem::Extern(extern_block) => {
+                    // 我们可以选择在这里检查 ABI，但为了简单起见，我们暂时接受任何字符串
+                    // if extern_block.abi != "C" { /* report unsupported ABI error */ }
+
+                    for func_decl in &extern_block.declarations {
+                        let ret_type = self.resolve_ast_type(&func_decl.return_type, diagnostics);
+                        let params_type: Vec<SemanticType> = func_decl
+                            .params
+                            .iter()
+                            .map(|p| self.resolve_ast_type(&p.0, diagnostics))
+                            .collect();
+                        
+                        let symbol_info = SymbolInfo::Function {
+                            return_type: ret_type,
+                            params: func_decl.params.iter().zip(params_type).map(|((_, ident), ty)| (ty, ident.name.clone())).collect(),
+                            // 从 AST 中获取 is_variadic 信息
+                            is_variadic: func_decl.is_variadic,
+                        };
+                        
+                        if self.symbol_table.add_symbol(&func_decl.name, symbol_info).is_err() {
+                            diagnostics.report(SemanticError::SymbolAlreadyExists(func_decl.name.clone()).into());
+                        }
+                    }
+                }
                 ast::GlobalItem::Struct(struct_def) => {
                     // --- 内存布局计算 ---
                     let mut resolved_fields = Vec::new();
@@ -94,6 +119,7 @@ impl Analyzer {
                             .zip(params_type)
                             .map(|((_, ident), ty)| (ty, ident.name.clone()))
                             .collect(),
+                        is_variadic: false,
                     };
 
                     if self.symbol_table.add_symbol(&func_def.name, symbol_info).is_err() {
@@ -132,9 +158,29 @@ impl Analyzer {
         // --- PASS 2: 完整分析 ---
         let mut hir_functions = Vec::new();
         let mut hir_globals = Vec::new();
+        let mut hir_extern_functions = Vec::new();
 
         for item in &program.items {
             match item {
+                // [NEW] 新增对 extern 块的处理
+                ast::GlobalItem::Extern(extern_block) => {
+                    for func_decl in &extern_block.declarations {
+                        // 将 ast::FunctionDecl 转换为 hir::FunctionDecl
+                        let return_type = self.resolve_ast_type(&func_decl.return_type, diagnostics);
+                        let params = func_decl.params
+                            .iter()
+                            .map(|(ty, _)| self.resolve_ast_type(ty, diagnostics))
+                            .collect();
+
+                        let hir_decl = Arc::new(hir::FunctionDecl {
+                            name: func_decl.name.clone(),
+                            params,
+                            return_type,
+                            is_variadic: func_decl.is_variadic,
+                        });
+                        hir_extern_functions.push(hir_decl);
+                    }
+                }
                 ast::GlobalItem::Struct(_) => {
                     // 所有对 struct 定义的必要分析都在第一遍扫描中完成了。
                     // 在第二遍扫描中，我们不需要对它做任何事情，只需要识别并跳过即可。
@@ -177,6 +223,7 @@ impl Analyzer {
             Some(hir::Program {
                 functions: hir_functions,
                 globals: hir_globals,
+                extern_functions: hir_extern_functions,
             })
         }
     }
@@ -838,35 +885,61 @@ impl Analyzer {
                 })
             }
             ast::ExprKind::FunctionCall { name, args } => {
-                if let Some(SymbolInfo::Function {
-                    return_type,
-                    params,
-                }) = self.symbol_table.lookup_symbol(name).cloned()
-                {
-                    if args.len() != params.len() {
-                        diagnostics.report(
-                            SemanticError::WrongArgumentCount {
+                // [REFACTORED] 这是处理函数调用的、完整的、修正后的逻辑
+                if let Some(SymbolInfo::Function { return_type, params, is_variadic }) = self.symbol_table.lookup_symbol(name).cloned() {
+                    
+                    // [CORRECTED] 这是最关键的修复：我们现在区分处理可变参数和非可变参数函数
+                    if is_variadic {
+                        // 对于可变参数函数，实际参数数量必须大于或等于具名参数数量
+                        if args.len() < params.len() {
+                            diagnostics.report(SemanticError::WrongArgumentCount {
                                 expected: params.len(),
                                 found: args.len(),
                                 span: expr.span.clone(),
-                            }
-                            .into(),
-                        );
-                        return None;
+                            }.into());
+                            return None;
+                        }
+                    } else {
+                        // 对于普通函数，数量必须严格相等
+                        if args.len() != params.len() {
+                            diagnostics.report(SemanticError::WrongArgumentCount {
+                                expected: params.len(),
+                                found: args.len(),
+                                span: expr.span.clone(),
+                            }.into());
+                            return None;
+                        }
                     }
-
+                    
+                    // 类型检查只针对具名的、固定的参数
                     let hir_args = args
                         .iter()
-                        .zip(params.iter())
+                        // 我们只取和 `params` 列表一样多的参数进行类型检查
+                        .zip(params.iter()) 
                         .map(|(arg_expr, (param_type, _))| {
+                            // 将函数签名的参数类型作为期望类型传递
                             self.visit_expression(arg_expr, Some(param_type), diagnostics)
                         })
                         .collect::<Option<Vec<_>>>()?;
-
+                    
+                    // 对于可变参数部分，我们暂时不进行类型检查，这符合 C 语言的行为
+                    // 我们需要将它们也加入到 HIR 节点中
+                    let mut final_hir_args = hir_args;
+                    if is_variadic {
+                        for i in params.len()..args.len() {
+                            // 对于可变参数，我们没有上下文，所以传递 None
+                            if let Some(variadic_arg) = self.visit_expression(&args[i], None, diagnostics) {
+                                final_hir_args.push(variadic_arg);
+                            } else {
+                                return None; // 如果可变参数部分本身有错，也直接失败
+                            }
+                        }
+                    }
+                    
                     Some(hir::Expression {
                         kind: hir::ExprKind::FunctionCall {
                             name: name.clone(),
-                            args: hir_args,
+                            args: final_hir_args,
                         },
                         span: expr.span.clone(),
                         resolved_type: return_type,

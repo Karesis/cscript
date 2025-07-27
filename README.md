@@ -1,4 +1,4 @@
-# **CScript** 
+# **CScript**
 
 **A modern systems language with a C soul and a Rust mind, built for a new era of development.**
 
@@ -40,6 +40,7 @@ We use a `name: type` declaration style inspired by modern languages. This elimi
 
   * **Rich Type System**: `i8`-`i64`, `u8`-`u64`, `f32`/`f64`, `bool`, `char`, and pointers.
   * **Modern Structs**: Define complex data types with a clean, Rust-style syntax and instantiate them with C-style aggregate literals.
+  * **Seamless C Interoperability (FFI)**: Call C standard library functions or your own C code directly via `extern "C"` blocks.
   * **Memory Safety (Compile-Time)**: Overflow checking for all numeric literals based on their context.
   * **Advanced Control Flow**: `if/else`, `while`, `return`, `break`, `continue`, and nested block scopes.
   * **LLVM Backend**: JIT compilation to high-performance, native executables.
@@ -49,10 +50,10 @@ We use a `name: type` declaration style inspired by modern languages. This elimi
 
 ## 🚀 **A Quick Tour**
 
-Let's see what CScript can do. Here's an example showcasing structs, functions, and modern syntax. Save this as `tour.csc`:
+Let's see what CScript can do. Here's an example showcasing structs, functions, and modern syntax. Save this as `tour.cx`:
 
-```csharp
-// tour.csc
+```rust
+// tour.cx
 // A quick tour of CScript's modern syntax and struct support.
 
 struct Point {
@@ -87,12 +88,46 @@ main() -> i32 {
 ### **Compile and Run**
 
 ```bash
-# Compile the program (use .csc or .c, the compiler doesn't mind)
-cargo run -- tour.csc -o tour_app
+# Compile the program
+cargo run -- tour.cx -o tour_app
 
 # Run the executable
 ./tour_app
 echo $? # Should output 30
+```
+
+-----
+
+## 🔗 **Interacting with C (FFI)**
+
+One of CScript's core strengths is its compatibility with the C ecosystem. Through the Foreign Function Interface (FFI), you can effortlessly call battle-tested C libraries, combining CScript's modern features with C's vast ecosystem.
+
+Here's how you can call the `printf` function from the C standard library. Save this as `ffi_example.cx`:
+
+```rust
+// ffi_example.cx
+
+extern "C" {
+    printf(format: char*, ...) -> i32;
+}
+
+main() -> i32 {
+    num: i32 = 42;
+    // Call a C function just like it's a native one
+    printf("Hello from CScript! The magic number is %d\n", num);
+    return 0;
+}
+```
+
+### **Compile and Run**
+
+```bash
+# Compile
+cargo run -- ffi_example.cx -o ffi_app
+
+# Run
+./ffi_app
+# Expected output: Hello from CScript! The magic number is 42
 ```
 
 -----
@@ -117,13 +152,12 @@ echo $? # Should output 30
 
 ## 🗺️ **The Road Ahead**
 
-Our journey is just beginning\! The next steps are focused on expanding the language's power and ecosystem.
+Our journey is accelerating\! The next steps are focused on expanding the language's power and ecosystem.
 
-  - [ ] **Arrays & Slices**: Implement first-class support for fixed-size arrays and potentially dynamic slices.
-  - [ ] **Enums & Tuples**: Add more expressive data structures inspired by modern languages.
-  - [ ] **C FFI (Foreign Function Interface)**: Leverage our C-compatible data model to allow seamless interoperability with existing C libraries.
-  - [ ] **Module System**: Design and implement a simple file-based module system.
-  - [ ] **Optimization**: Integrate more of LLVM's powerful optimization passes.
+  * [ ] **Arrays & Slices**: Implement first-class support for fixed-size arrays and potentially dynamic slices.
+  * [ ] **Enums & Tuples**: Add more expressive data structures inspired by modern languages.
+  * [ ] **Module System**: Design and implement a simple file-based module system.
+  * [ ] **Optimization**: Integrate more of LLVM's powerful optimization passes.
 
 -----
 
@@ -137,9 +171,4 @@ Please feel free to open an issue or submit a pull request.
 
 ## 📜 **License**
 
-This project is licensed under the Apache License, Version 2.0.
-
-A copy of the license is available in the repository's `LICENSE` file and at:
-[http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0)
-
-
+This project is licensed under the Apache License, Version 2.0. A copy of the license is available in the repository's `LICENSE` file and at: [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0)

@@ -72,6 +72,8 @@ pub enum Token {
     Continue,
     #[token("struct")]
     Struct,
+    #[token("extern")]
+    Extern,
 
     // 有符号整数家族 (i-family)
     #[token("i8")]
@@ -161,6 +163,8 @@ pub enum Token {
     Colon,
     #[token("->")]     
     Arrow,
+    #[token("...")]
+    Ellipsis,
     
     // Delimiters
     #[token("(")]

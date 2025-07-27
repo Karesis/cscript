@@ -1,4 +1,4 @@
-# **CScript** 
+# **CScript**
 
 **一个拥有 C 语言之魂和 Rust 思想的现代系统级语言，为新时代的开发而生。**
 
@@ -40,6 +40,7 @@ CScript 不仅仅是 C 的又一个方言，它是对 C 语言潜力的一次重
 
   * **丰富的类型系统**: `i8` 至 `i64`, `u8` 至 `u64`, `f32`/`f64`, `bool`, `char` 以及指针。
   * **现代结构体**: 使用简洁的、类 Rust 的语法定义复杂数据类型，并用 C 风格的聚合字面量进行实例化。
+  * **无缝的 C 语言互操作性 (FFI)**: 通过 `extern "C"` 块，可以直接调用 C 标准库或你自己的 C 函数。
   * **内存安全 (编译时)**: 基于上下文对所有数字字面量进行溢出检查。
   * **高级控制流**: `if/else`, `while`, `return`, `break`, `continue` 以及嵌套的代码块作用域。
   * **LLVM 后端**: 即时编译 (JIT) 生成高性能的本地可执行文件。
@@ -49,10 +50,10 @@ CScript 不仅仅是 C 的又一个方言，它是对 C 语言潜力的一次重
 
 ## 🚀 **快速上手**
 
-让我们看看 CScript 的能力。下面的例子展示了结构体、函数和现代语法。请将代码保存为 `tour.csc`：
+让我们看看 CScript 的能力。下面的例子展示了结构体、函数和现代语法。请将代码保存为 `tour.cx`：
 
-```csharp
-// tour.csc
+```rust
+// tour.cx
 // CScript 现代语法与结构体支持的快速概览
 
 struct Point {
@@ -87,12 +88,46 @@ main() -> i32 {
 ### **编译并运行**
 
 ```bash
-# 编译程序 (使用 .csc 或 .c 后缀均可)
-cargo run -- tour.csc -o tour_app
+# 编译程序
+cargo run -- tour.cx -o tour_app
 
 # 运行可执行文件
 ./tour_app
 echo $? # 应该输出 30
+```
+
+-----
+
+## 🔗 **与 C 语言交互 (FFI)**
+
+CScript 的核心优势之一是其与 C 生态系统的兼容性。通过外部函数接口 (FFI)，你可以毫不费力地调用久经考验的 C 库，将 CScript 的现代特性与 C 的庞大生态系统结合起来。
+
+下面的例子展示了如何调用 C 标准库中的 `printf` 函数。请将代码保存为 `ffi_example.cx`：
+
+```rust
+// ffi_example.cx
+
+extern "C" {
+    printf(format: char*, ...) -> i32;
+}
+
+main() -> i32 {
+    num: i32 = 42;
+    // 直接调用 C 函数，就像它是原生函数一样
+    printf("Hello from CScript! The magic number is %d\n", num);
+    return 0;
+}
+```
+
+### **编译并运行**
+
+```bash
+# 编译
+cargo run -- ffi_example.cx -o ffi_app
+
+# 运行
+./ffi_app
+# 屏幕会输出: Hello from CScript! The magic number is 42
 ```
 
 -----
@@ -117,11 +152,10 @@ echo $? # 应该输出 30
 
 ## 🗺️ **未来规划**
 
-我们的旅程才刚刚开始！后续步骤将聚焦于扩展语言的能力和生态系统。
+我们的旅程正在加速！后续步骤将聚焦于扩展语言的能力和生态系统。
 
   * [ ] **数组与切片**: 实现对定长数组和（可能）动态切片的一等公民支持。
   * [ ] **枚举与元组**: 添加更多源自现代语言的、富有表达力的数据结构。
-  * [ ] **C FFI (外部函数接口)**: 利用我们与 C 兼容的数据模型，实现与现有 C 库的无缝互操作。
   * [ ] **模块系统**: 设计并实现一个简单的、基于文件的模块系统。
   * [ ] **优化**: 集成更多 LLVM 强大的优化遍 (passes)。
 
@@ -138,4 +172,5 @@ CScript 是一个宏大的开源项目，我们欢迎各种形式的贡献！无
 ## 📜 **许可证**
 
 本项目采用Apache-2.0 License:
+
   * Apache License, Version 2.0 ([LICENSE-APACHE](https://www.google.com/search?q=LICENSE-APACHE) or [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0))

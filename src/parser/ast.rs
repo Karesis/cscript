@@ -15,9 +15,30 @@ pub struct Program {
 /// A top-level item in a program, e.g., a function or global variable.
 #[derive(Debug, Clone)]
 pub enum GlobalItem {
+    Extern(ExternBlock), 
     Struct(StructDef),
     Function(FunctionDef),
     VarDecl(VarDecl), // For global variables
+}
+
+// [NEW] Represents a function declaration without a body, for use in `extern` blocks.
+#[derive(Debug, Clone)]
+pub struct FunctionDecl {
+    pub name: Ident,
+    pub params: Vec<(Type, Ident)>,
+    pub return_type: Type,
+    // A flag to indicate if the function is variadic (accepts `...` arguments).
+    pub is_variadic: bool,
+    pub span: Span,
+}
+
+// [NEW] Represents an `extern "ABI" { ... }` block.
+#[derive(Debug, Clone)]
+pub struct ExternBlock {
+    // The Application Binary Interface (ABI) string, e.g., "C".
+    pub abi: String,
+    pub declarations: Vec<FunctionDecl>,
+    pub span: Span,
 }
 
 /// A complete function definition.

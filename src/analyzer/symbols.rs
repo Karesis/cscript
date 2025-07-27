@@ -13,6 +13,8 @@ pub enum SymbolInfo {
     Function {
         return_type: SemanticType,    // [FIXED] 使用 SemanticType
         params: Vec<(SemanticType, String)>, // [FIXED] 使用 SemanticType
+        // [NEW] 添加一个标志来记录函数是否是可变参数的
+        is_variadic: bool,
     },
     // [NEW] 新增一个变体，用于存储用户定义的类型信息，比如 struct。
     Type { ty: SemanticType },

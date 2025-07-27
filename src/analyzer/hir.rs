@@ -48,6 +48,15 @@ pub enum Storage {
 pub struct Program {
     pub functions: Vec<Function>,
     pub globals: Vec<Arc<VarDecl>>,
+    pub extern_functions: Vec<Arc<FunctionDecl>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FunctionDecl {
+    pub name: Ident,
+    pub params: Vec<SemanticType>,
+    pub return_type: SemanticType,
+    pub is_variadic: bool,
 }
 
 #[derive(Debug)]

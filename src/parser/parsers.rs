@@ -248,6 +248,86 @@ where
             .labelled("struct definition")
     };
 
+    // [NEW] 这是为 FFI 新增的、完整的解析器逻辑
+    let extern_block_parser = {
+        // 1. 定义一个解析器，用于处理单个常规参数 "name: type"
+        // 这个部分保持不变
+        let param_decl = ident.clone()
+            .then_ignore(just(Token::Colon))
+            .then(type_.clone())
+            .map(|(ident, type_)| (type_, ident));
+
+        // 2. [REWRITTEN] 重新设计参数列表解析器，以正确处理所有变长参数的情况
+        let params_parser = {
+            // CASE A: 一个或多个常规参数，后面可能跟着 ", ..."
+            let regular_params_with_optional_variadic = param_decl.clone()
+                .separated_by(just(Token::Comma))
+                .at_least(1) // 确保至少有一个常规参数
+                .collect::<Vec<_>>()
+                .then(
+                    // 后面可选地跟着一个逗号和省略号
+                    just(Token::Comma)
+                        .ignore_then(just(Token::Ellipsis))
+                        .or_not()
+                )
+                .map(|(params, opt_ellipsis)| {
+                    // 将结果统一为 (参数列表, 是否为变长) 的元组
+                    (params, opt_ellipsis.is_some())
+                });
+
+            // CASE B: 只有 "..."
+            let variadic_only = just(Token::Ellipsis)
+                .to((Vec::new(), true)); // 结果是 (空参数列表, 是变长)
+
+            // 最终的参数解析器组合了以上情况
+            choice((
+                regular_params_with_optional_variadic,
+                variadic_only,
+            ))
+            .or_not() // CASE C: 处理空参数列表 "()" 的情况
+            .map(|opt| {
+                // 将 Option<T> 转换成 T，对于 None (空参数) 的情况，提供默认值
+                opt.unwrap_or_else(|| (Vec::new(), false))
+            })
+        };
+
+        // 3. 定义一个解析器，用于处理单个的外部函数声明
+        // 这里的逻辑基本不变，只是现在接收的是新的 params_parser 的输出
+        let function_decl_parser = ident.clone()
+            .then(
+                params_parser // <-- 使用重写后的 params_parser
+                    .delimited_by(just(Token::LParen), just(Token::RParen))
+            )
+            .then(just(Token::Arrow).ignore_then(type_.clone()))
+            .then_ignore(just(Token::Semicolon))
+            .map_with(|(((name, (params, is_variadic)), return_type)), e| {
+                FunctionDecl {
+                    name,
+                    params,
+                    return_type,
+                    is_variadic, // <-- 直接使用解析出的布尔值
+                    span: e.span(),
+                }
+            });
+
+        // 4. 最后，组装成完整的 `extern "ABI" { ... }` 解析器
+        // 这部分保持不变
+        just(Token::Extern)
+            .ignore_then(select! { Token::String(s) => s })
+            .then(
+                function_decl_parser
+                    .repeated()
+                    .collect()
+                    .delimited_by(just(Token::LBrace), just(Token::RBrace))
+            )
+            .map_with(|(abi, declarations), e| ExternBlock {
+                abi,
+                declarations,
+                span: e.span(),
+            })
+            .labelled("extern block")
+    };
+
     let func_def = ident.clone() // 1. 先匹配函数名
         .then( // 2. 然后匹配参数列表
             // [FIX] 定义一个能解析 "name: type" 的新规则
@@ -276,8 +356,11 @@ where
             })
         })
         .labelled("function definition");
+
+    
     
     let item = choice((
+        extern_block_parser.map(GlobalItem::Extern),
         struct_def_parser.map(GlobalItem::Struct),
         func_def,
         var_decl.map(GlobalItem::VarDecl),

@@ -81,8 +81,23 @@ impl<'ctx> CodeGen<'ctx> {
         }
 
         // --- PASS 1: 函数声明 ---
+        
+        // 首先，为所有 extern "C" 函数生成声明
+        for func_decl in &program.extern_functions {
+            self.codegen_function_declaration(func_decl, diagnostics)?;
+        }
+
+        // 然后，为所有我们自己实现的函数生成声明
         for func in &program.functions {
-            self.codegen_function_declaration(func, diagnostics)?;
+            // 我们需要将 hir::Function 适配为 codegen_function_declaration 需要的 hir::FunctionDecl 格式
+            // 这是一个临时的适配，未来可以优化
+            let temp_decl = hir::FunctionDecl {
+                name: func.name.clone(),
+                params: func.params.iter().map(|p| p.var_type.clone()).collect(),
+                return_type: func.return_type.clone(),
+                is_variadic: false, // 我们自己实现的函数永远不是可变参数的
+            };
+            self.codegen_function_declaration(&temp_decl, diagnostics)?;
         }
 
         // --- PASS 2: 函数定义 ---
@@ -132,21 +147,27 @@ impl<'ctx> CodeGen<'ctx> {
         Some(())
     }
 
-    /// [REFACTORED] PASS 1: 只声明函数原型。
+    /// [REFACTORED] PASS 1: 现在可以处理任何函数声明（内部或外部），并支持可变参数。
     fn codegen_function_declaration(
         &mut self,
-        func: &hir::Function,
-        _diagnostics: &mut DiagnosticBag, // _diagnostics 保留以备将来使用
+        func: &hir::FunctionDecl, // [MODIFIED] 参数类型改为更通用的 FunctionDecl
+        _diagnostics: &mut DiagnosticBag,
     ) -> Option<()> {
         let param_types: Vec<BasicMetadataTypeEnum<'ctx>> = func
             .params
             .iter()
-            .map(|p| self.to_llvm_type(&p.var_type).into())
+            .map(|p_type| self.to_llvm_type(p_type).into())
             .collect();
 
-        let fn_type = match func.return_type {
-            SemanticType::Void => self.context.void_type().fn_type(&param_types, false),
-            _ => self.to_llvm_type(&func.return_type).fn_type(&param_types, false),
+        let fn_type = match &func.return_type {
+            SemanticType::Void => self.context.void_type().fn_type(
+                &param_types,
+                func.is_variadic, // [MODIFIED] 将 is_variadic 标志传递给 LLVM
+            ),
+            _ => self.to_llvm_type(&func.return_type).fn_type(
+                &param_types,
+                func.is_variadic, // [MODIFIED] 将 is_variadic 标志传递给 LLVM
+            ),
         };
 
         let function = self.module.add_function(&func.name.name, fn_type, None);
