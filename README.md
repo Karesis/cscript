@@ -1,185 +1,118 @@
-CScript: A Modern Compiler Built with Rust
-Project Vision
+# **CScript 🚀**
 
-CScript began as a C compiler, but its goal is to transcend C. By borrowing design philosophies from modern languages like Rust, we are committed to evolving CScript into a syntactically modern, type-safe, and developer-friendly systems programming language.
+**A modern systems language with a C soul and a Rust mind, built for a new era of development.**  
+CScript is a new, from-scratch compiler for a systems programming language that combines the low-level control of C with the modern syntax and safety features inspired by Rust. It's designed for developers who love C's simplicity and performance but crave a more expressive, less error-prone development experience.  
+This project is built in Rust, leveraging a world-class toolchain to achieve an industrial-grade standard:
 
-This project is built from scratch in Rust, integrating a world-class toolchain for modern compiler development with the goal of reaching an industrial-grade standard:
+* **Lexical Analysis**: logos  
+* **Syntactic Analysis**: chumsky  
+* **Semantic Analysis**: Hand-written Visitor Pattern  
+* **Code Generation**: inkwell (LLVM)  
+* **Error Reporting**: ariadne
 
-    Lexical Analysis: logos - A blazingly fast lexer generator.
+## **✨ Why CScript?**
 
-    Syntactic Analysis: chumsky - An expressive and powerful parser combinator library.
+CScript isn't just another C dialect. It's a reimagining of what C could be, guided by a few core principles:
 
-    Semantic Analysis: A hand-written visitor pattern with context-driven type resolution.
+### **🧠 Context-Driven Typing**
 
-    Code Generation: inkwell - A safe Rust wrapper for LLVM.
+Literals are flexible and powerful. In x: u8 \= 10;, the integer 10 is intelligently understood as a u8, with compile-time overflow checks. No more verbose casting for simple cases.
 
-    Error Reporting: ariadne - For generating beautiful and precise compiler diagnostics.
+### **💖 Developer-First Diagnostics**
 
-The project has successfully implemented a complete compilation pipeline from source code to native executables, featuring a robust, end-to-end error reporting system.
-Compiler Status & Language Features
+Clear, precise error messages are not an afterthought. Powered by ariadne, our diagnostic system points you exactly to the problem, making debugging faster and more intuitive.
 
-CScript has evolved from a simple C subset into an independent language with its own unique syntax. All core features are implemented and have passed end-to-end testing.
-1. Modern Syntax
+### **🛠️ Modern, Unambiguous Syntax**
 
-CScript adopts a clearer and less error-prone type-after syntax:
+We use a name: type declaration style inspired by modern languages. This eliminates classic C ambiguities (like the [most vexing parse](https://en.wikipedia.org/wiki/Most_vexing_parse)) and makes the code cleaner and easier to read.
 
-    Variable Declarations: variable_name: type = value;
+## **📚 Features at a Glance**
 
-    x: i32 = 10;
-    PI: f64 = 3.14;
+* **Rich Type System**: i8-i64, u8-u64, f32/f64, bool, char, and pointers.  
+* **Modern Structs**: Define complex data types with a clean, Rust-style syntax and instantiate them with C-style aggregate literals.  
+* **Memory Safety (Compile-Time)**: Overflow checking for all numeric literals based on their context.  
+* **Advanced Control Flow**: if/else, while, return, break, continue, and nested block scopes.  
+* **LLVM Backend**: JIT compilation to high-performance, native executables.  
+* **Complete Toolchain**: From source code to executable, the entire pipeline is robust and tested.
 
-    Function Definitions: function_name(param: type) -> return_type { ... }
+## **🚀 A Quick Tour**
 
-    add(a: i32, b: i32) -> i32 {
-        return a + b;
-    }
+Let's see what CScript can do. Here's an example showcasing structs, functions, and modern syntax. Save this as tour.csc:  
+// tour.csc  
+// A quick tour of CScript's modern syntax and struct support.
 
-2. Rich Primitive Type System
-
-    Signed Integers: i8, i16, i32 (or int), i64
-
-    Unsigned Integers: u8, u16, u32, u64
-
-    Floating-Point Numbers: f32, f64
-
-    Other Types: char, bool, void
-
-    Pointers: Supports pointers to any level, e.g., i32*, char**.
-
-3. Statements
-
-    Variable Declarations: Supports local and global variable declarations with initializers.
-
-    const qualifier.
-
-    Control Flow:
-
-        if / else conditional statements.
-
-        while loop statements.
-
-        Block Statements: Supports arbitrarily nested code blocks { ... } as standalone statements.
-
-    Jump Statements: return, break, continue.
-
-    Expression Statements: Any valid expression followed by a semicolon.
-
-4. Expressions
-
-    Literals:
-
-        Integer Literals: Type is determined by the context (e.g., in x: u8 = 10;, 10 is inferred as u8).
-
-        Float Literals: (e.g., 3.14159).
-
-        Boolean Literals: true, false.
-
-        String Literals: ("hello", with type char*).
-
-    Operators:
-
-        Arithmetic: +, -, *, /, % (supports both integers and floats).
-
-        Comparison: ==, !=, >, <, >=, <= (supports both integers and floats).
-
-        Logical: &&, || (Note: short-circuiting is not yet implemented).
-
-        Unary: - (negation), ! (logical not), & (address-of), * (dereference).
-
-        Assignment: =.
-
-    Function Calls: Supports function calls with arguments.
-
-5. Other Core Features
-
-    Scoping: Correctly handles global, function, and block scopes.
-
-    Type Safety: Performs strict type checking at compile-time, including overflow checks for numeric literals.
-
-    Comments: Supports single-line // and multi-line /* ... */ comments.
-
-Major Unsupported Features
-
-    struct, union, enum
-
-    Array declaration and access
-
-    for loops (can be emulated with while)
-
-    typedef and type aliases
-
-    Explicit type casting
-
-    A preprocessor
-
-Installation
-Build from Source
-
-    Ensure you have the Rust toolchain and clang installed.
-
-    Clone this repository:
-
-    git clone https://github.com/karesis/cscript.git
-    cd cscript
-
-    Build the release executable:
-
-    cargo build --release
-
-    The executable will be located at target/release/cscript.
-
-Usage
-
-Assume you have a fib.c file written in the new CScript syntax:
-
-// fib.c
-// A Fibonacci function written in CScript's modern syntax.
-
-fib(n: i32) -> i32 {
-    if (n < 2) {
-        return n;
-    }
-    return fib(n - 1) + fib(n - 2);
+struct Point {  
+    x: i32,  
+    y: i32  
 }
 
-main() -> i32 {
-    return fib(10); // The result should be 55
+// Pass struct by value  
+sum(p: Point) \-\> i32 {  
+    return p.x \+ p.y;  
 }
 
-Compile to an Executable
+// Pass struct by pointer  
+move(p\_ptr: Point\*) \-\> void {  
+    (\*p\_ptr).x \= (\*p\_ptr).x \+ 10;  
+}
 
-# The default output name will be 'fib'
-cargo run -- fib.c
+main() \-\> i32 {  
+    // Instantiate with an aggregate literal.  
+    // The type is determined by the context.  
+    my\_point: Point \= { 5, 10 };  
+      
+    initial\_sum: i32 \= sum(my\_point); // Should be 15  
+      
+    move(\&my\_point); // my\_point is now {15, 10}  
+      
+    // The final result should be 15 \+ 15 \= 30  
+    return my\_point.x \+ initial\_sum;  
+}
 
-# Run the program
-./fib
-echo $? # Should output 55
+### **Compile and Run**
 
-Specify an Output Filename
+\# Compile the program (use .csc or .c, the compiler doesn't mind)  
+cargo run \-- tour.csc \-o tour\_app
 
-cargo run -- fib.c -o my_fib_program
-./my_fib_program
-echo $? # Should output 55
+\# Run the executable  
+./tour\_app  
+echo $? \# Should output 30
 
-Emit LLVM IR
+## **🔧 Installation**
 
-If you want to inspect the intermediate representation generated by the compiler, use the -S or --emit-llvm flag.
+### **Build from Source**
 
-cargo run -- fib.c -S -o fib.ll
+1. Ensure you have the [Rust toolchain](https://rustup.rs/) and clang installed.  
+2. Clone this repository:  
+   git clone https://github.com/karesis/cscript.git  
+   cd cscript
 
-This will generate a text file named fib.ll containing the LLVM IR corresponding to fib.c.
-Future Plans
+3. Build the release executable:  
+   cargo build \--release
 
-Our journey has just begun!
+   The executable will be located at target/release/cscript.
 
-    [ ] Advanced Data Structures: Implement full support for struct and arrays.
+## **🗺️ The Road Ahead**
 
-    [ ] Type Inference: Introduce the let keyword for variable declarations, enabling inference like let x = 10;.
+Our journey is just beginning\! The next steps are focused on expanding the language's power and ecosystem.
 
-    [ ] Module System: Design and implement a simple file-based module system.
+* \[ \] **Arrays & Slices**: Implement first-class support for fixed-size arrays and potentially dynamic slices.  
+* \[ \] **Type Inference**: Introduce the let keyword for variable declarations, enabling inference like let x \= 10;.  
+* \[ \] **Enums & Tuples**: Add more expressive data structures inspired by modern languages.  
+* \[ \] **C FFI (Foreign Function Interface)**: Leverage our C-compatible data model to allow seamless interoperability with existing C libraries.  
+* \[ \] **Module System**: Design and implement a simple file-based module system.  
+* \[ \] **Optimization**: Integrate more of LLVM's powerful optimization passes.
 
-    [ ] Optimization & Performance: Integrate more LLVM optimization passes and profile the compiler itself for performance improvements.
+## **🙌 Contributing**
 
-    [ ] Language Ecosystem: Explore the possibility of building a standard library, a package manager, and more.
+CScript is an ambitious open-source project, and we welcome contributions of all kinds\! Whether it's reporting a bug, suggesting a feature, improving documentation, or writing code, your help is valued.  
+Please feel free to open an issue or submit a pull request.
 
-We welcome contributions of all kinds. Let's build an exciting new language together!
+## **📜 License**
+
+This project is licensed under either of
+
+* Apache License, Version 2.0, ([LICENSE-APACHE](https://www.google.com/search?q=LICENSE-APACHE) or [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0))  
+* MIT license ([LICENSE-MIT](https://www.google.com/search?q=LICENSE-MIT) or [http://opensource.org/licenses/MIT](http://opensource.org/licenses/MIT))
+
+at your option.
