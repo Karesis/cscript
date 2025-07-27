@@ -11,7 +11,7 @@ use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Module, Linkage};
-use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
+use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum, StructType};
 use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, PointerValue, GlobalValue};
 use inkwell::{AddressSpace, IntPredicate, FloatPredicate};
 use std::collections::HashMap;
@@ -49,6 +49,7 @@ pub struct CodeGen<'ctx> {
     module: Module<'ctx>,
     builder: Builder<'ctx>,
     functions: HashMap<String, FunctionValue<'ctx>>,
+    struct_types: HashMap<String, StructType<'ctx>>,
     global_variables: HashMap<Arc<hir::VarDecl>, GlobalValue<'ctx>>,
     variables: HashMap<Arc<hir::VarDecl>, PointerValue<'ctx>>,
     current_function: Option<FunctionValue<'ctx>>,
@@ -64,6 +65,7 @@ impl<'ctx> CodeGen<'ctx> {
             module,
             builder,
             functions: HashMap::new(),
+            struct_types: HashMap::new(),
             global_variables: HashMap::new(), 
             variables: HashMap::new(),
             current_function: None,
@@ -190,7 +192,7 @@ impl<'ctx> CodeGen<'ctx> {
 
     /// [CORRECTED] visit_const_expression 现在可以正确处理浮点数常量。
     fn visit_const_expression(
-        &self,
+        &mut self,
         expr: &hir::Expression,
         diagnostics: &mut DiagnosticBag,
     ) -> Option<BasicValueEnum<'ctx>> {
@@ -223,20 +225,34 @@ impl<'ctx> CodeGen<'ctx> {
         }
     }
 
-    fn to_llvm_type(&self, ty: &SemanticType) -> BasicTypeEnum<'ctx> {
+    fn to_llvm_type(&mut self, ty: &SemanticType) -> BasicTypeEnum<'ctx> {
         match ty {
-            SemanticType::Bool => self.context.bool_type().into(),
-            SemanticType::Char => self.context.i8_type().into(),
             SemanticType::Integer { width, .. } => self.context.custom_width_int_type(*width as u32).into(),
             SemanticType::Float { width } => match width {
                 32 => self.context.f32_type().into(),
                 64 => self.context.f64_type().into(),
                 _ => unreachable!(),
             },
+            SemanticType::Bool => self.context.bool_type().into(),
+            SemanticType::Char => self.context.i8_type().into(),
+            SemanticType::Struct { name, fields, .. } => {
+                if let Some(struct_type) = self.struct_types.get(&name.name) {
+                    return (*struct_type).into();
+                }
+                let struct_type = self.context.opaque_struct_type(&name.name);
+                self.struct_types.insert(name.name.clone(), struct_type);
+                let field_types: Vec<BasicTypeEnum<'ctx>> = fields
+                    .iter()
+                    .map(|(_, field_type)| self.to_llvm_type(field_type))
+                    .collect();
+                struct_type.set_body(&field_types, false);
+                struct_type.into()
+            }
             SemanticType::Ptr(_) => self.context.ptr_type(AddressSpace::default()).into(),
             _ => unimplemented!("LLVM type for {:?} is not a basic type", ty),
         }
     }
+
 
     fn create_entry_block_alloca<T: BasicType<'ctx>>(
         &self,
@@ -371,6 +387,32 @@ impl<'ctx> CodeGen<'ctx> {
                 hir::LiteralValue::String(s) => Some(self.builder.build_global_string_ptr(s, "str").unwrap().as_pointer_value().into()),
             },
 
+            // [NEW] 这是处理结构体实例化的核心逻辑
+            hir::ExprKind::StructLiteral { struct_type, fields } => {
+                // 1. 获取 struct 的 LLVM 类型
+                let llvm_struct_type = self.to_llvm_type(struct_type).into_struct_type();
+
+                // 2. 在栈上为 struct 实例分配内存
+                let struct_ptr = self.create_entry_block_alloca("struct_literal", llvm_struct_type, diagnostics)?;
+
+                // 3. 遍历所有字段，并逐一填充
+                for (i, (field_ident, field_expr)) in fields.iter().enumerate() {
+                    // 3a. 递归生成字段初始化表达式的值
+                    let field_val = self.visit_expression(field_expr, diagnostics)?;
+
+                    // 3b. 使用 GEP 计算该字段的内存地址
+                    let field_ptr = self.builder
+                        .build_struct_gep(llvm_struct_type, struct_ptr, i as u32, &field_ident.name)
+                        .unwrap();
+                    
+                    // 3c. 将值存入该地址
+                    self.builder.build_store(field_ptr, field_val).unwrap();
+                }
+
+                // 4. 从栈指针中加载整个 struct 的值，作为表达式的结果返回
+                Some(self.builder.build_load(llvm_struct_type, struct_ptr, "loadstruct").unwrap())
+            }
+
             hir::ExprKind::Variable(_) => {
                 let var_ptr = self.visit_lvalue(expr, diagnostics)?;
                 let var_type = self.to_llvm_type(&expr.resolved_type);
@@ -485,6 +527,13 @@ impl<'ctx> CodeGen<'ctx> {
                 let call_result = self.builder.build_call(function, &hir_args, "calltmp").unwrap();
                 Some(call_result.try_as_basic_value().left().unwrap_or_else(|| self.context.i32_type().const_zero().into()))
             }
+            hir::ExprKind::MemberAccess { .. } => {
+                // 1. 获取成员的地址 (l-value)
+                let member_ptr = self.visit_lvalue(expr, diagnostics)?;
+                // 2. 从地址中加载值
+                let member_type = self.to_llvm_type(&expr.resolved_type);
+                Some(self.builder.build_load(member_type, member_ptr, "loadmember").unwrap())
+            }
         }
     }
 
@@ -514,6 +563,43 @@ impl<'ctx> CodeGen<'ctx> {
             hir::ExprKind::Dereference(ptr_expr) => {
                 Some(self.visit_expression(ptr_expr, diagnostics)?.into_pointer_value())
             }
+            hir::ExprKind::MemberAccess { expression, member } => {
+                let struct_ptr = self.visit_lvalue(expression, diagnostics)?;
+                if let SemanticType::Struct { fields, .. } = &expression.resolved_type {
+                    let field_index = fields
+                        .iter()
+                        .position(|(field_ident, _)| field_ident.name == member.name)
+                        .unwrap();
+
+                    // [CORRECTED] 解决了所有权冲突
+                    // 1. 先调用 to_llvm_type，结束对 `self` 的第一次可变借用。
+                    let llvm_struct_type = self.to_llvm_type(&expression.resolved_type);
+                    // 2. 现在可以安全地对 `self` 进行第二次可变借用（通过 self.builder）。
+
+                    match self.builder.build_struct_gep(
+                        llvm_struct_type, // 使用临时变量
+                        struct_ptr,
+                        field_index as u32,
+                        &member.name,
+
+                    ) {
+
+                        Ok(ptr) => Some(ptr.into()),
+                        Err(e) => {
+                            diagnostics.report(
+                                CodeGenError::InternalError {
+                                    message: format!("Failed to generate GEP for member '{}': {}", member.name, e.to_string()),
+                                    span: Some(expr.span.clone()),
+                                }
+                                .into(),
+                            );
+                            None
+                        }
+                    }
+                } else {
+                    unreachable!("Member access on non-struct type in codegen");
+                }
+            } 
             _ => {
                 diagnostics.report(CodeGenError::InternalError {
                     message: "Invalid l-value".to_string(),

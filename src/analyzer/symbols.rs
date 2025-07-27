@@ -14,6 +14,8 @@ pub enum SymbolInfo {
         return_type: SemanticType,    // [FIXED] 使用 SemanticType
         params: Vec<(SemanticType, String)>, // [FIXED] 使用 SemanticType
     },
+    // [NEW] 新增一个变体，用于存储用户定义的类型信息，比如 struct。
+    Type { ty: SemanticType },
 }
 
 /// 代表一个独立的作用域，例如一个函数体或一个 if 代码块

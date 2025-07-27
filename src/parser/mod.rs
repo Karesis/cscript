@@ -49,8 +49,6 @@ pub fn parse(source: &str, diagnostics: &mut DiagnosticBag) -> Option<Program> {
         let message = format!(
             "Expected {}, but found {}",
             expected_str,
-            // [CORRECTED] The closure now correctly takes a reference to a Token (`tok`)
-            // and formats it directly, without trying to access a non-existent field `.0`.
             error.found().map_or("end of input".to_string(), |tok| format!("`{:?}`", tok))
         );
 

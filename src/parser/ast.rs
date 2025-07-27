@@ -15,6 +15,7 @@ pub struct Program {
 /// A top-level item in a program, e.g., a function or global variable.
 #[derive(Debug, Clone)]
 pub enum GlobalItem {
+    Struct(StructDef),
     Function(FunctionDef),
     VarDecl(VarDecl), // For global variables
 }
@@ -26,6 +27,15 @@ pub struct FunctionDef {
     pub name: Ident,
     pub params: Vec<(Type, Ident)>,
     pub body: Block,
+    pub span: Span,
+}
+
+// [NEW] Represents a full `struct` definition.
+#[derive(Debug, Clone)]
+pub struct StructDef {
+    pub name: Ident,
+    // A struct contains a vector of field declarations (name: type).
+    pub fields: Vec<(Ident, Type)>, 
     pub span: Span,
 }
 
@@ -91,6 +101,10 @@ pub struct Expression {
 pub enum ExprKind {
     Literal(LiteralValue),
     Variable(Ident),
+    // Represents an aggregate literal, e.g., `{ 1, add(2, 3) }`
+    AggregateLiteral {
+        values: Vec<Expression>,
+    },
     UnaryOp {
         op: UnaryOp,
         right: Box<Expression>,
@@ -107,6 +121,10 @@ pub enum ExprKind {
     FunctionCall {
         name: Ident,
         args: Vec<Expression>,
+    },
+    MemberAccess {
+        expression: Box<Expression>,
+        member: Ident,
     },
 }
 
@@ -169,6 +187,8 @@ pub enum Type {
     // [NEW] 浮点数类型
     F32,
     F64,
+
+    Struct(Ident),
 
     // 指针类型
     Ptr(Box<Type>),

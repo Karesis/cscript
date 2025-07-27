@@ -137,6 +137,60 @@ pub const E0210_INTERNAL_COMPILER_ERROR: ErrorCode = ErrorCode {
                   Please report this issue with the source code that caused it."
 };
 
+pub const E0211_TYPE_NOT_FOUND: ErrorCode = ErrorCode {
+    code: "E0211",
+    level: DiagnosticLevel::Error,
+    message: "Type not found",
+    explanation: "The compiler could not find a definition for the specified type in the current scope. \
+                  Ensure that the type (e.g., a struct) is defined before it is used and check for typos."
+};
+
+pub const E0212_NOT_A_TYPE: ErrorCode = ErrorCode {
+    code: "E0212",
+    level: DiagnosticLevel::Error,
+    message: "Not a type",
+    explanation: "The identifier used in a type context does not refer to a type. It might be a variable, a function, \
+                  or another kind of symbol."
+};
+
+pub const E0213_MEMBER_ACCESS_ON_NON_STRUCT: ErrorCode = ErrorCode {
+    code: "E0213",
+    level: DiagnosticLevel::Error,
+    message: "Member access on non-struct type",
+    explanation: "The dot operator (`.`) can only be used to access fields on a struct. The type of the expression \
+                  on the left-hand side is not a struct."
+};
+
+pub const E0214_FIELD_NOT_FOUND: ErrorCode = ErrorCode {
+    code: "E0214",
+    level: DiagnosticLevel::Error,
+    message: "Field not found",
+    explanation: "The specified field does not exist on the struct type. Check for typos or refer to the struct's definition."
+};
+
+pub const E0215_EXPECTED_VALUE_FOUND_TYPE: ErrorCode = ErrorCode {
+    code: "E0215",
+    level: DiagnosticLevel::Error,
+    message: "Expected a value, found a type name",
+    explanation: "Type names (like struct names) cannot be used as values in an expression. You might have intended to \
+                  instantiate the type or refer to a variable of that type."
+};
+
+pub const E0216_AGGREGATE_LITERAL_IN_INVALID_CONTEXT: ErrorCode = ErrorCode {
+    code: "E0216",
+    level: DiagnosticLevel::Error,
+    message: "Aggregate literal used in an invalid context",
+    explanation: "Aggregate literals like `{...}` can only be used where a specific struct type is expected, \
+                  such as in a variable declaration with a type annotation (`x: MyStruct = {...}`)."
+};
+
+pub const E0217_INVALID_FIELD_COUNT_IN_STRUCT_LITERAL: ErrorCode = ErrorCode {
+    code: "E0217",
+    level: DiagnosticLevel::Error,
+    message: "Wrong number of fields in struct literal",
+    explanation: "The number of values provided in the aggregate literal `{...}` does not match the number of fields \
+                  defined in the struct."
+};
 // --- E03xx: Code Generation Errors ---
 
 pub const E0300_LLVM_VERIFICATION_FAILED: ErrorCode = ErrorCode {
@@ -153,3 +207,4 @@ pub const E0301_INTERNAL_CODEGEN_ERROR: ErrorCode = ErrorCode {
     message: "Internal code generation error",
     explanation: "An unexpected error occurred within the code generator. This likely indicates a bug in the CScript compiler."
 };
+

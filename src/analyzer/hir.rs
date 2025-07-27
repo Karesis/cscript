@@ -120,6 +120,16 @@ impl Hash for Expression {
 pub enum ExprKind {
     Literal(LiteralValue),
     Variable(Arc<VarDecl>),
+    MemberAccess {
+        expression: Box<Expression>,
+        member: Ident,
+    },
+    StructLiteral {
+        // 存储 struct 的完整类型信息
+        struct_type: Arc<SemanticType>,
+        // 存储每个字段的名字和已经过完整分析的、类型正确的初始化表达式
+        fields: Vec<(Ident, Expression)>,
+    },
     UnaryOp {
         op: UnaryOp,
         right: Box<Expression>,

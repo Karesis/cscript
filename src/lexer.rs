@@ -70,6 +70,8 @@ pub enum Token {
     Break,
     #[token("continue")]
     Continue,
+    #[token("struct")]
+    Struct,
 
     // 有符号整数家族 (i-family)
     #[token("i8")]

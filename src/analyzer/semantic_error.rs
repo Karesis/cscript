@@ -36,6 +36,25 @@ pub enum SemanticError {
         message: String,
         span: Option<Span>,
     },
+    TypeNotFound(Ident),
+    NotAType(Ident),
+    MemberAccessOnNonStruct {
+        span: Span,
+    },
+    FieldNotFound {
+        field_name: Ident,
+        struct_type: SemanticType,
+    },
+    ExpectedValueFoundType(Ident),
+    AggregateLiteralInInvalidContext {
+        span: Span,
+    },
+    InvalidFieldCount {
+        expected: usize,
+        found: usize,
+        struct_name: String,
+        span: Span,
+    },
 }
 // 为了方便打印 SemanticType
 impl Display for SemanticType {
@@ -108,6 +127,34 @@ impl From<SemanticError> for Diagnostic {
                     // 而不是 ErrorCode 中那个通用的 "Internal compiler error"。
                     .with_dynamic_message(message)
             }
+            SemanticError::TypeNotFound(ident) => Diagnostic::error(
+                &E0211_TYPE_NOT_FOUND,
+                Label::new(ident.span, format!("Cannot find type `{}` in this scope", ident.name)),
+            ),
+            SemanticError::NotAType(ident) => Diagnostic::error(
+                &E0212_NOT_A_TYPE,
+                Label::new(ident.span, format!("`{}` is not a type", ident.name)),
+            ),
+            SemanticError::MemberAccessOnNonStruct { span } => Diagnostic::error(
+                &E0213_MEMBER_ACCESS_ON_NON_STRUCT,
+                Label::new(span, "This is not a struct, so its members cannot be accessed"),
+            ),
+            SemanticError::FieldNotFound { field_name, struct_type } => Diagnostic::error(
+                &E0214_FIELD_NOT_FOUND,
+                Label::new(field_name.span, format!("No field `{}` on this struct", field_name.name)),
+            ).with_note(format!("The type of the struct is `{}`", struct_type)),
+            SemanticError::ExpectedValueFoundType(ident) => Diagnostic::error(
+                &E0215_EXPECTED_VALUE_FOUND_TYPE,
+                Label::new(ident.span, format!("`{}` is a type name and cannot be used as a value", ident.name)),
+            ),
+            SemanticError::AggregateLiteralInInvalidContext { span } => Diagnostic::error(
+                &E0216_AGGREGATE_LITERAL_IN_INVALID_CONTEXT,
+                Label::new(span, "This literal requires a struct type context"),
+            ),
+            SemanticError::InvalidFieldCount { expected, found, struct_name, span } => Diagnostic::error(
+                &E0217_INVALID_FIELD_COUNT_IN_STRUCT_LITERAL,
+                Label::new(span, format!("Expected {} fields, but found {}", expected, found)),
+            ).with_note(format!("Struct `{}` is defined with {} fields", struct_name, expected)),
         }
     }
 }

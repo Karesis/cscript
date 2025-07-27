@@ -3,7 +3,6 @@ mod semantic_error;
 mod symbols;
 pub mod types;
 
-// [MODIFIED] 确保所有需要的模块都被正确引入
 use crate::analyzer::{
     semantic_error::SemanticError,
     symbols::{SymbolInfo, SymbolTable},
@@ -12,6 +11,7 @@ use crate::analyzer::{
 use crate::diagnostics::DiagnosticBag;
 use crate::parser::ast::{self, Type as AstType, BinaryOp, UnaryOp};
 use std::sync::Arc;
+use std::collections::HashMap;
 
 /// 语义分析器
 pub struct Analyzer {
@@ -41,12 +41,49 @@ impl Analyzer {
         // --- PASS 1: 收集所有全局符号 ---
         for item in &program.items {
             match item {
+                ast::GlobalItem::Struct(struct_def) => {
+                    // --- 内存布局计算 ---
+                    let mut resolved_fields = Vec::new();
+                    let mut offsets = HashMap::new();
+                    let mut current_offset = 0;
+
+                    for (field_name, field_ast_type) in &struct_def.fields {
+                        // 1. 解析字段的类型
+                        let field_type = self.resolve_ast_type(field_ast_type, diagnostics);
+                        let field_size = field_type.size_of();
+
+                        // 2. 存储字段的偏移量
+                        offsets.insert(field_name.name.clone(), current_offset);
+                        
+                        // 3. 将解析后的字段信息存起来
+                        resolved_fields.push((field_name.clone(), Arc::new(field_type)));
+                        
+                        // 4. 更新下一个字段的起始偏移量
+                        current_offset += field_size;
+                    }
+
+                    // 结构体的总大小就是所有字段大小之和（暂不考虑对齐）
+                    let total_size = current_offset;
+
+                    // --- 构建完整的 SemanticType::Struct ---
+                    let struct_type = SemanticType::Struct {
+                        name: struct_def.name.clone(),
+                        fields: resolved_fields,
+                        size: total_size,
+                        offsets,
+                    };
+
+                    // --- 将新的类型定义存入符号表 ---
+                    if self.symbol_table.add_symbol(&struct_def.name, SymbolInfo::Type { ty: struct_type }).is_err() {
+                        diagnostics.report(SemanticError::SymbolAlreadyExists(struct_def.name.clone()).into());
+                    }
+                }
                 ast::GlobalItem::Function(func_def) => {
-                    let ret_type = self.resolve_ast_type(&func_def.return_type);
+                    let ret_type = self.resolve_ast_type(&func_def.return_type, diagnostics);
                     let params_type: Vec<SemanticType> = func_def
                         .params
                         .iter()
-                        .map(|p| self.resolve_ast_type(&p.0))
+                        .map(|p| self.resolve_ast_type(&p.0, diagnostics))
                         .collect();
 
                     let symbol_info = SymbolInfo::Function {
@@ -65,7 +102,7 @@ impl Analyzer {
                     }
                 }
                 ast::GlobalItem::VarDecl(var_decl) => {
-                    let var_type = self.resolve_ast_type(&var_decl.var_type);
+                    let var_type = self.resolve_ast_type(&var_decl.var_type, diagnostics);
                     let hir_decl = Arc::new(hir::VarDecl {
                         name: var_decl.name.clone(),
                         var_type,
@@ -98,6 +135,10 @@ impl Analyzer {
 
         for item in &program.items {
             match item {
+                ast::GlobalItem::Struct(_) => {
+                    // 所有对 struct 定义的必要分析都在第一遍扫描中完成了。
+                    // 在第二遍扫描中，我们不需要对它做任何事情，只需要识别并跳过即可。
+                }
                 ast::GlobalItem::Function(func_def) => {
                     if let Some(hir_func) = self.visit_function(func_def, diagnostics) {
                         hir_functions.push(hir_func);
@@ -140,7 +181,11 @@ impl Analyzer {
         }
     }
 
-    fn resolve_ast_type(&self, ast_type: &AstType) -> SemanticType {
+    fn resolve_ast_type(
+        &mut self, // [MODIFIED] 需要可变引用，因为我们可能需要报告错误
+        ast_type: &AstType,
+        diagnostics: &mut DiagnosticBag,
+    ) -> SemanticType {
         match ast_type {
             AstType::Void => SemanticType::Void,
             AstType::Bool => SemanticType::Bool,
@@ -155,7 +200,38 @@ impl Analyzer {
             AstType::U64 => SemanticType::Integer { width: 64, is_signed: false },
             AstType::F32 => SemanticType::Float { width: 32 },
             AstType::F64 => SemanticType::Float { width: 64 },
-            AstType::Ptr(base) => SemanticType::Ptr(Arc::new(self.resolve_ast_type(base))),
+            // [NEW] 这是处理 struct 类型的核心逻辑
+            AstType::Struct(ident) => {
+                // 1. 在符号表中查找这个名字
+                if let Some(symbol_info) = self.symbol_table.lookup_symbol(ident) {
+                    // 2. 检查找到的符号是不是一个类型
+                    if let SymbolInfo::Type { ty } = symbol_info {
+                        // 3. 确认这个类型确实是一个 struct
+                        if let SemanticType::Struct { .. } = ty {
+                            // 成功！返回这个类型的克隆
+                            ty.clone()
+                        } else {
+                            // 找到了一个类型，但它不是 struct（未来可能是 enum 等）
+                            diagnostics.report(SemanticError::NotAType(ident.clone()).into());
+                            // 返回一个“毒丸”值以允许分析继续
+                            SemanticType::Void
+                        }
+                    } else {
+                        // 找到了一个同名的符号，但它不是类型（比如是个变量或函数）
+                        diagnostics.report(SemanticError::NotAType(ident.clone()).into());
+                        SemanticType::Void
+                    }
+                } else {
+                    // 在符号表中完全找不到这个名字
+                    diagnostics.report(SemanticError::TypeNotFound(ident.clone()).into());
+                    SemanticType::Void
+                }
+            },
+            AstType::Ptr(base) => {
+                // 递归调用时，也需要传递 diagnostics
+                let resolved_base = self.resolve_ast_type(base, diagnostics);
+                SemanticType::Ptr(Arc::new(resolved_base))
+            }
         }
     }
 
@@ -164,7 +240,7 @@ impl Analyzer {
         func_def: &ast::FunctionDef,
         diagnostics: &mut DiagnosticBag,
     ) -> Option<hir::Function> {
-        let return_type = self.resolve_ast_type(&func_def.return_type);
+        let return_type = self.resolve_ast_type(&func_def.return_type, diagnostics);
         self.current_function_return_type = Some(return_type.clone());
         self.current_stack_offset = 0;
 
@@ -172,7 +248,7 @@ impl Analyzer {
 
         let mut hir_params = Vec::new();
         for (param_type, param_name) in &func_def.params {
-            let resolved_type = self.resolve_ast_type(param_type);
+            let resolved_type = self.resolve_ast_type(param_type, diagnostics);
             let size = resolved_type.size_of();
             self.current_stack_offset += size;
             let storage = hir::Storage::Local {
@@ -231,7 +307,7 @@ impl Analyzer {
                 Some(hir::Statement::Block(hir_block))
             }
             ast::Statement::VarDecl(var_decl) => {
-                let var_type = self.resolve_ast_type(&var_decl.var_type);
+                let var_type = self.resolve_ast_type(&var_decl.var_type, diagnostics);
                 let mut hir_initializer = None;
 
                 if let Some(init_expr) = &var_decl.init {
@@ -376,6 +452,48 @@ impl Analyzer {
         diagnostics: &mut DiagnosticBag,
     ) -> Option<hir::Expression> {
         match &expr.kind {
+            // [REFACTORED] 这是处理聚合体字面量的、完整的“审查”逻辑
+            ast::ExprKind::AggregateLiteral { values } => {
+                // 1. 检查上下文：必须期望一个 struct 类型
+                if let Some(SemanticType::Struct { name, fields, .. }) = expected_type {
+                    // 2. 检查字段数量是否匹配
+                    if values.len() != fields.len() {
+                        diagnostics.report(SemanticError::InvalidFieldCount {
+                            expected: fields.len(),
+                            found: values.len(),
+                            struct_name: name.name.clone(),
+                            span: expr.span.clone(),
+                        }.into());
+                        return None;
+                    }
+
+                    // 3. 按顺序检查每个字段的类型
+                    let hir_fields = values.iter().zip(fields.iter())
+                        .map(|(value_expr, (field_ident, field_type))| {
+                            // 递归调用 visit_expression，并将字段的类型作为新的期望类型传递下去
+                            let hir_value_expr = self.visit_expression(value_expr, Some(field_type), diagnostics)?;
+                            Some((field_ident.clone(), hir_value_expr))
+                        })
+                        .collect::<Option<Vec<_>>>()?;
+
+                    // 4. 所有检查通过，构建 HIR 节点
+                    Some(hir::Expression {
+                        kind: hir::ExprKind::StructLiteral {
+                            struct_type: Arc::new(expected_type.unwrap().clone()),
+                            fields: hir_fields,
+                        },
+                        span: expr.span.clone(),
+                        resolved_type: expected_type.unwrap().clone(),
+                    })
+
+                } else {
+                    // 错误：在无效的上下文（非 struct 或无上下文）中使用了聚合体字面量
+                    diagnostics.report(SemanticError::AggregateLiteralInInvalidContext {
+                        span: expr.span.clone(),
+                    }.into());
+                    None
+                }
+            }
             ast::ExprKind::Literal(literal) => match literal {
                 ast::LiteralValue::Integer(s) => {
                     if let Some(SemanticType::Float { width }) = expected_type {
@@ -501,6 +619,10 @@ impl Analyzer {
                 }),
                 Some(SymbolInfo::Function { .. }) => {
                     diagnostics.report(SemanticError::NotAFunction(ident.clone()).into());
+                    None
+                }
+                Some(SymbolInfo::Type { .. }) => {
+                    diagnostics.report(SemanticError::ExpectedValueFoundType(ident.clone()).into());
                     None
                 }
                 None => {
@@ -681,26 +803,27 @@ impl Analyzer {
                 })
             }
             ast::ExprKind::Assignment { left, right } => {
-                let hir_left = self.visit_expression(left, None, diagnostics)?;
-                let hir_right =
-                    self.visit_expression(right, Some(&hir_left.resolved_type), diagnostics)?;
-
+                // [CORRECTED] 更新了左值检查的逻辑
                 match &left.kind {
                     ast::ExprKind::Variable(_)
-                    | ast::ExprKind::UnaryOp {
-                        op: ast::UnaryOp::Dereference,
-                        ..
-                    } => {}
+                    | ast::ExprKind::UnaryOp { op: ast::UnaryOp::Dereference, .. }
+                    | ast::ExprKind::MemberAccess { .. } => {
+                        // This is a valid l-value, proceed.
+                    }
                     _ => {
                         diagnostics.report(SemanticError::InvalidLValue(left.span.clone()).into());
                         return None;
                     }
                 }
 
+                // 先分析左边，以确定右边的期望类型
+                let hir_left = self.visit_expression(left, None, diagnostics)?;
+                // 将左值的类型作为期望类型传递给右值
+                let hir_right = self.visit_expression(right, Some(&hir_left.resolved_type), diagnostics)?;
+
                 if let hir::ExprKind::Variable(decl) = &hir_left.kind {
                     if decl.is_const {
-                        diagnostics
-                            .report(SemanticError::AssignmentToConst(left.span.clone()).into());
+                        diagnostics.report(SemanticError::AssignmentToConst(left.span.clone()).into());
                     }
                 }
 
@@ -750,6 +873,41 @@ impl Analyzer {
                     })
                 } else {
                     diagnostics.report(SemanticError::NotAFunction(name.clone()).into());
+                    None
+                }
+            }
+            // [NEW] 这是处理成员访问的核心逻辑
+            ast::ExprKind::MemberAccess { expression, member } => {
+                // 1. 首先，递归地分析点号 `.` 左边的表达式，此时我们不知道它的期望类型
+                let hir_expr = self.visit_expression(expression, None, diagnostics)?;
+
+                // 2. 检查左边表达式的类型是否真的是一个 struct
+                if let SemanticType::Struct { fields, .. } = &hir_expr.resolved_type {
+                    // 3. 在 struct 的字段列表中查找我们想要访问的成员
+                    if let Some((_, field_type)) = fields.iter().find(|(field_ident, _)| field_ident.name == member.name) {
+                        // 4. 成功！整个表达式的类型就是该成员的类型
+                        let resolved_type = (**field_type).clone();
+                        Some(hir::Expression {
+                            kind: hir::ExprKind::MemberAccess {
+                                expression: Box::new(hir_expr),
+                                member: member.clone(),
+                            },
+                            span: expr.span.clone(),
+                            resolved_type,
+                        })
+                    } else {
+                        // 5. 错误：在 struct 中找不到该字段
+                        diagnostics.report(SemanticError::FieldNotFound {
+                            field_name: member.clone(),
+                            struct_type: hir_expr.resolved_type.clone(),
+                        }.into());
+                        None
+                    }
+                } else {
+                    // 6. 错误：试图在非 struct 类型上使用 `.` 操作符
+                    diagnostics.report(SemanticError::MemberAccessOnNonStruct {
+                        span: expression.span.clone(),
+                    }.into());
                     None
                 }
             }

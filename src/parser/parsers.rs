@@ -5,7 +5,7 @@ use crate::parser::ast::*;
 use chumsky::input::ValueInput;
 use chumsky::prelude::*;
 
-// [CORRECTED] 这是标准的、正确的 chumsky 错误类型别名。
+// 这是标准的、正确的 chumsky 错误类型别名。
 pub(super) type ParseError<'a> = extra::Err<Rich<'a, Token, Span>>;
 
 /// 构建完整的 chumsky 解析器。
@@ -20,6 +20,42 @@ where
 
     // --- 基础解析器 ---
     let ident = select! { Token::Ident(name) = e => Ident { name, span: e.span() } }.labelled("identifier");
+    // [REFACTORED] `type_parser` 现在是一个闭包，定义在 `program_parser` 内部。
+    // 这样它就可以捕获并使用在它之前定义的 `ident` 解析器。
+    let type_parser = || {
+        let base_type = select! {
+            Token::Int => Type::I32,
+            Token::Char => Type::Char,
+            Token::Bool => Type::Bool,
+            Token::Void => Type::Void,
+            Token::I8 => Type::I8,
+            Token::I16 => Type::I16,
+            Token::I32 => Type::I32,
+            Token::I64 => Type::I64,
+            Token::U8 => Type::U8,
+            Token::U16 => Type::U16,
+            Token::U32 => Type::U32,
+            Token::U64 => Type::U64,
+            Token::F32 => Type::F32,
+            Token::F64 => Type::F64,
+        }
+        // [FIX] 现在它可以毫无问题地访问 `ident`
+        .or(ident.clone().map(Type::Struct));
+
+        base_type
+            .then(
+                just(Token::Star)
+                    .repeated()
+                    .collect::<Vec<_>>(),
+            )
+            .map(|(mut base, pointers)| {
+                for _ in pointers {
+                    base = Type::Ptr(Box::new(base));
+                }
+                base
+            })
+            .labelled("type")
+    };
     let type_ = type_parser().boxed();
 
     // --- 表达式解析器定义 ---
@@ -27,6 +63,15 @@ where
         // [CORRECTED] 彻底修复了 .unwrap() 问题。
         // 因为我们的词法分析器已经将整数解析为 i64，这里不再需要进行任何 parse() 调用。
         let atom = choice((
+            expr.clone()
+                .separated_by(just(Token::Comma))
+                .allow_trailing()
+                .collect::<Vec<_>>()
+                .delimited_by(just(Token::LBrace), just(Token::RBrace))
+                .map_with(|values, e| Expression {
+                    kind: ExprKind::AggregateLiteral { values },
+                    span: e.span(),
+                }),
             select! {
                 Token::Integer(val) = e => Expression { kind: ExprKind::Literal(LiteralValue::Integer(val)), span: e.span() },
                 Token::Float(val) = e => Expression { kind: ExprKind::Literal(LiteralValue::Float(val)), span: e.span() },
@@ -49,13 +94,31 @@ where
             } else { callee }
         });
 
+        // [NEW] 新增的一层，用于处理成员访问，例如 `my_struct.field`
+        // 它的优先级高于一元运算符，但低于函数调用。
+        let member_access = call.clone().foldl(
+            // 重复匹配 ".member"
+            just(Token::Dot).ignore_then(ident.clone()).repeated(),
+            // 使用 foldl (左折叠) 来处理链式访问，例如 `a.b.c`
+            |expression, member| {
+                let span = expression.span.clone().start..member.span.end;
+                Expression {
+                    kind: ExprKind::MemberAccess {
+                        expression: Box::new(expression),
+                        member,
+                    },
+                    span,
+                }
+            },
+        );
+
         let op = |c| just(c);
         let unary_op = op(Token::Minus).to(UnaryOp::Negate)
             .or(op(Token::Not).to(UnaryOp::Not))
             .or(op(Token::Ampersand).to(UnaryOp::AddressOf)) 
             .or(op(Token::Star).to(UnaryOp::Dereference));
         
-        let unary = unary_op.repeated().foldr(call, |op, right| {
+        let unary = unary_op.repeated().foldr(member_access, |op, right| {
             let span = right.span.clone();
             Expression { kind: ExprKind::UnaryOp { op, right: Box::new(right) }, span }
         });
@@ -156,6 +219,35 @@ where
     );
 
     // --- 顶层解析器 (所有逻辑保持不变) ---
+
+    let struct_def_parser = {
+        // 首先，定义一个解析器来处理单个字段，例如 "x: i32"
+        let field_parser = ident.clone()
+            .then_ignore(just(Token::Colon))
+            .then(type_.clone());
+
+        // 接下来，定义 struct 的主体，即 "{ field1, field2, ... }"
+        let body_parser = field_parser
+            .separated_by(just(Token::Comma)) // 字段由逗号分隔
+            .allow_trailing() // 允许末尾有逗号，这是现代语言的友好特性
+            .collect::<Vec<_>>()
+            .delimited_by(just(Token::LBrace), just(Token::RBrace));
+
+            // 最后，将所有部分组合起来： "struct" 关键字，名字，以及主体
+        just(Token::Struct)
+            .ignore_then(ident.clone()) // 匹配 "struct Name" 并获取 Name
+            .then(body_parser) // 匹配 "{ ... }" 并获取字段列表
+            .map_with(|(name, fields), e| {
+                // 将解析结果组装成我们在 ast.rs 中定义的 StructDef 结构体
+                StructDef {
+                    name,
+                    fields,
+                    span: e.span(),
+                }
+            })
+            .labelled("struct definition")
+    };
+
     let func_def = ident.clone() // 1. 先匹配函数名
         .then( // 2. 然后匹配参数列表
             // [FIX] 定义一个能解析 "name: type" 的新规则
@@ -186,6 +278,7 @@ where
         .labelled("function definition");
     
     let item = choice((
+        struct_def_parser.map(GlobalItem::Struct),
         func_def,
         var_decl.map(GlobalItem::VarDecl),
     )).boxed();
@@ -197,46 +290,3 @@ where
 }
 
 
-/// 辅助函数：类型解析器 (保持不变)
-fn type_parser<'a, I>() -> impl Parser<'a, I, Type, ParseError<'a>>
-where
-    I: Input<'a, Token = Token, Span = Span> + ValueInput<'a>,
-{
-    // [MODIFIED] `select!` 宏现在可以识别所有新的类型 Token
-    let base_type = select! {
-        // 传统类型
-        Token::Int => Type::I32, // 将旧的 int 直接映射到新的 I32
-        Token::Char => Type::Char,
-        Token::Bool => Type::Bool,
-        Token::Void => Type::Void,
-
-        // 整数类型
-        Token::I8 => Type::I8,
-        Token::I16 => Type::I16,
-        Token::I32 => Type::I32,
-        Token::I64 => Type::I64,
-        Token::U8 => Type::U8,
-        Token::U16 => Type::U16,
-        Token::U32 => Type::U32,
-        Token::U64 => Type::U64,
-
-        // 浮点数类型
-        Token::F32 => Type::F32,
-        Token::F64 => Type::F64,
-    };
-
-    // 指针解析逻辑保持不变
-    base_type
-        .then(
-            just(Token::Star)
-            .repeated()
-            .collect::<Vec<_>>()
-        )
-        .map(|(mut base, pointers)| {
-            for _ in pointers {
-                base = Type::Ptr(Box::new(base));
-            }
-            base
-        })
-        .labelled("type")
-}
