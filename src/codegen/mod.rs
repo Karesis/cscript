@@ -5,20 +5,18 @@ pub mod function;
 pub mod lvalue;
 pub mod utils;
 
-use crate::analyzer::{hir, types::SemanticType};
+use crate::analyzer::hir;
 use crate::diagnostics::{
     codes::{E0300_LLVM_VERIFICATION_FAILED, E0301_INTERNAL_CODEGEN_ERROR},
     Diagnostic, DiagnosticBag, Label,
 };
 use crate::lexer::Span;
-use crate::parser::ast::{BinaryOp, LiteralValue, UnaryOp};
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
-use inkwell::module::{Module, Linkage};
-use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum, StructType};
-use inkwell::values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, PointerValue, GlobalValue};
-use inkwell::{AddressSpace, IntPredicate, FloatPredicate};
+use inkwell::module::Module;
+use inkwell::types::StructType;
+use inkwell::values::{FunctionValue, PointerValue, GlobalValue};
 use std::collections::HashMap;
 use std::sync::Arc;
 

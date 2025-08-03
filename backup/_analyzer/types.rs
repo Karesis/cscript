@@ -3,9 +3,6 @@ use crate::parser::ast::Ident;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use crate::diagnostics::DiagnosticBag;
-use crate::parser::ast::{self, Type as AstType};
-use crate::analyzer::{semantic_error::SemanticError, symbols::{SymbolInfo, SymbolTable}};
 
 // [REFACTORED] SemanticType 现在能够精确地描述所有原生数字类型。
 #[derive(Debug, Clone, PartialEq)]
@@ -103,53 +100,6 @@ impl SemanticType {
             // 指针和函数指针的大小取决于目标平台架构，这里我们假定为 64 位。
             SemanticType::Ptr(_) => 8, 
             SemanticType::Function { .. } => 8,
-        }
-    }
-}
-
-pub fn resolve_ast_type(
-    ast_type: &AstType,
-    symbol_table: &SymbolTable, // 只依赖符号表
-    diagnostics: &mut DiagnosticBag,
-) -> SemanticType {
-    match ast_type {
-        AstType::Void => SemanticType::Void,
-        AstType::Bool => SemanticType::Bool,
-        AstType::Char => SemanticType::Char,
-        AstType::Int | AstType::I32 => SemanticType::Integer { width: 32, is_signed: true },
-        AstType::I8 => SemanticType::Integer { width: 8, is_signed: true },
-        AstType::I16 => SemanticType::Integer { width: 16, is_signed: true },
-        AstType::I64 => SemanticType::Integer { width: 64, is_signed: true },
-        AstType::U8 => SemanticType::Integer { width: 8, is_signed: false },
-        AstType::U16 => SemanticType::Integer { width: 16, is_signed: false },
-        AstType::U32 => SemanticType::Integer { width: 32, is_signed: false },
-        AstType::U64 => SemanticType::Integer { width: 64, is_signed: false },
-        AstType::F32 => SemanticType::Float { width: 32 },
-        AstType::F64 => SemanticType::Float { width: 64 },
-        
-        AstType::Struct(ident) => {
-            // [FIX] 将 self.symbol_table.lookup_symbol 改为 symbol_table.lookup_symbol
-            if let Some(symbol_info) = symbol_table.lookup_symbol(ident) {
-                if let SymbolInfo::Type { ty } = symbol_info {
-                    if let SemanticType::Struct { .. } = ty {
-                        ty.clone()
-                    } else {
-                        diagnostics.report(SemanticError::NotAType(ident.clone()).into());
-                        SemanticType::Void
-                    }
-                } else {
-                    diagnostics.report(SemanticError::NotAType(ident.clone()).into());
-                    SemanticType::Void
-                }
-            } else {
-                diagnostics.report(SemanticError::TypeNotFound(ident.clone()).into());
-                SemanticType::Void
-            }
-        },
-        AstType::Ptr(base) => {
-            // [FIX] 递归调用时，必须传入所有需要的参数
-            let resolved_base = resolve_ast_type(base, symbol_table, diagnostics);
-            SemanticType::Ptr(Arc::new(resolved_base))
         }
     }
 }
