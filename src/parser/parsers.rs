@@ -256,6 +256,7 @@ where
                 left
             }
         })
+        .boxed()
         .labelled("expression")
     });
 
