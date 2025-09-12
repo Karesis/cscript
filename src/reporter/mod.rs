@@ -12,6 +12,11 @@ pub enum CompilerError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     Lexical(#[from] LexerError),
+
+    /// 语法分析阶段的错误
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Parsing(#[from] ParserError),
     // --- 在这里可以添加未来的错误类型 ---
     // #[diagnostic(transparent)]
     // Parsing(#[from] ParserError),
@@ -40,4 +45,20 @@ pub enum LexerError {
     //     #[label("这个字符串从这里开始，但没有找到结束的引号")]
     //     span: SourceSpan,
     // },
+}
+
+/// 语法分析器可能产生的所有错误的集合。
+#[derive(Debug, Error, Diagnostic)]
+pub enum ParserError {
+    #[error("语法错误: 期望 {expected}, 但找到了 {found}")]
+    #[diagnostic(
+        code(E0100),
+        help("请检查语法并确保其符合语言规则。")
+    )]
+    UnexpectedToken {
+        expected: String,
+        found: String,
+        #[label("在这里")]
+        span: SourceSpan,
+    },
 }

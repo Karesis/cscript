@@ -4,6 +4,7 @@ use logos::Logos;
 use crate::reporter::{CompilerError, LexerError};
 // 导入定位处理
 use std::ops::Range;
+use std::fmt;
 
 // 声明单元测试模块
 #[cfg(test)]
@@ -171,6 +172,13 @@ pub enum Token {
     Semicolon,
     #[token(",")]
     Comma,
+}
+
+// Implement Display for Token to make it easier to print them out during debugging.
+impl fmt::Display for Token {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 /// 字符串字面量的辅助解析函数

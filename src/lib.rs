@@ -1,2 +1,3 @@
 mod reporter;
-mod lexer;
+pub mod lexer;
+pub mod parser;
