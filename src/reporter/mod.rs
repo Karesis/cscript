@@ -23,11 +23,11 @@ pub enum CompilerError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     Semantic(#[from] SemanticError),
-    // --- 在这里可以添加未来的错误类型 ---
-    // #[diagnostic(transparent)]
-    // Parsing(#[from] ParserError),
-    // #[diagnostic(transparent)]
-    // TypeChecking(#[from] TypeError),
+
+    /// 代码生成阶段的错误
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    CodeGen(#[from] CodeGenError),
 }
 
 /// 词法分析器可能产生的所有错误的集合
@@ -219,6 +219,40 @@ pub enum SemanticError {
         expected: usize,
         found: usize,
         #[label("此处提供了 {found} 个字段")]
+        span: SourceSpan,
+    },
+}
+
+/// 代码生成阶段可能产生的所有错误的集合。
+#[derive(Debug, Error, Diagnostic)]
+pub enum CodeGenError {
+    #[error("LLVM 模块验证失败: {message}")]
+    #[diagnostic(
+        code(E0300),
+        help("这是一个编译器自身的 Bug，通常意味着生成的 LLVM IR 不合法。请向编译器开发者报告此问题。")
+    )]
+    LLVMVerificationFailed {
+        message: String,
+    },
+
+    #[error("内部代码生成错误: {message}")]
+    #[diagnostic(
+        code(E0301),
+        help("这是一个编译器自身的 Bug，发生在尝试将 HIR 转换为 LLVM IR 的过程中。请报告此问题。")
+    )]
+    InternalError {
+        message: String,
+        #[label("{message}")]
+        span: SourceSpan,
+    },
+
+    #[error("全局变量的初始化表达式必须是常量")]
+    #[diagnostic(
+        code(E0302),
+        help("全局变量在编译时就必须确定其值，因此不能使用函数调用或其他变量作为其初始值。")
+    )]
+    NonConstantGlobalInitializer {
+        #[label("此表达式不是一个常量")]
         span: SourceSpan,
     },
 }
