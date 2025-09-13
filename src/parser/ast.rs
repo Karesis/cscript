@@ -1,5 +1,6 @@
 use std::hash::Hash;
-use super::Span;
+use std::fmt;
+use crate::utils::Span;
 
 /// AST 的根节点，代表整个源文件。
 #[derive(Debug, Clone)]
@@ -263,6 +264,32 @@ pub enum Type {
     Ptr(Box<Type>),
 }
 
+// 为Type实现Display trait，用于reporter的thiserror报错
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Type::Int => write!(f, "int"),
+            Type::Char => write!(f, "char"),
+            Type::Bool => write!(f, "bool"),
+            Type::Void => write!(f, "void"),
+            Type::I8 => write!(f, "i8"),
+            Type::I16 => write!(f, "i16"),
+            Type::I32 => write!(f, "i32"),
+            Type::I64 => write!(f, "i64"),
+            Type::U8 => write!(f, "u8"),
+            Type::U16 => write!(f, "u16"),
+            Type::U32 => write!(f, "u32"),
+            Type::U64 => write!(f, "u64"),
+            Type::F32 => write!(f, "f32"),
+            Type::F64 => write!(f, "f64"),
+            // 这里会直接调用我们上面为 Ident 实现的 Display
+            Type::Struct(ident) => write!(f, "{}", ident),
+            // 递归地调用 Display 来处理指针的基类型
+            Type::Ptr(base) => write!(f, "*{}", base),
+        }
+    }
+}
+
 /// 一个标识符，例如变量名、函数名或结构体名。
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub struct Ident {
@@ -270,4 +297,12 @@ pub struct Ident {
     pub name: String,
     /// 标识符在源代码中的位置范围（Span），用于错误报告。
     pub span: Span,
+}
+
+// 为Ident实现Display trait，用于reporter的thiserror报错
+impl fmt::Display for Ident {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // 当需要将 Ident 显示为字符串时，我们只关心它的名字。
+        write!(f, "{}", self.name)
+    }
 }

@@ -13,9 +13,9 @@ mod test;
 use crate::reporter::{CompilerError, ParserError};
 use crate::lexer::Token;
 use crate::parser::ast::Program;
+use crate::utils::Span;
 use chumsky::input::{Stream, Input};
 use chumsky::Parser;
-type Span = std::ops::Range<usize>;
 // 从内部实现模块中导入解析器构建函数
 use parsers::program_parser;
 
@@ -30,14 +30,15 @@ pub fn parse(
     source_len: usize,
     tokens: Vec<(Token, Span)>,
 ) -> (Option<Program>, Vec<CompilerError>) {
+
     let mut errors: Vec<CompilerError> = Vec::new();
 
     // --- 1. 创建 Token 流 ---
     // `chumsky` 需要一个 Token 流 (Stream) 作为输入。
-    // 我们还需要提供一个文件末尾 (End of Input) 的 span，以便在代码意外结束时报告错误。
-    let eoi_span = source_len..source_len;
+    // 还需要提供一个文件末尾 (End of Input) 的 span，以便在代码意外结束时报告错误。
+    let eoi_span = Span::new(source_len, source_len);
     let token_stream = Stream::from_iter(tokens)
-        .map(eoi_span, |(token, span)| (token, span));
+        .map(eoi_span, |(token, span)| (token, span.into()));
 
     // --- 2. 获取并运行解析器 ---
     let parser = program_parser();
@@ -51,7 +52,7 @@ pub fn parse(
             .found()
             .map_or("文件末尾".to_string(), |tok| {
                 // 使用 Token 的 Debug 实现来显示它
-                format!("`{:?}`", tok)
+                format!("`{}`", tok)
             });
 
         // 格式化“期望的 (expected)” Token 列表。

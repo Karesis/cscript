@@ -2,7 +2,7 @@ use crate::lexer::Token;
 use super::ast::*;
 use chumsky::input::ValueInput;
 use chumsky::prelude::*;
-use super::Span;
+use crate::utils::Span;
 
 // 为 chumsky 的标准错误类型 `extra::Err` 创建一个更简洁的别名。
 pub(super) type ParseError<'a> = extra::Err<Rich<'a, Token, Span>>;
@@ -175,7 +175,7 @@ where
                         expression: Box::new(expression),
                         member,
                     },
-                    span,
+                    span: span.into(),
                 }
             },
         );
@@ -203,7 +203,7 @@ where
             .or(op(Token::Percent).to(BinaryOp::Modulo));
         let product = unary.clone().foldl(product_op.then(unary).repeated(), |left, (op, right)| {
             let span = left.span.start..right.span.end;
-            Expression { kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) }, span }
+            Expression { kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) }, span: span.into() }
         });
 
         // 优先级 6: 加法/减法 (左结合)。
@@ -211,7 +211,7 @@ where
             .or(op(Token::Minus).to(BinaryOp::Subtract));
         let sum = product.clone().foldl(sum_op.then(product).repeated(), |left, (op, right)| {
             let span = left.span.start..right.span.end;
-            Expression { kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) }, span }
+            Expression { kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) }, span: span.into() }
         });
 
         // 优先级 7: 关系运算 (左结合)。
@@ -221,7 +221,7 @@ where
             .or(op(Token::Gte).to(BinaryOp::Gte));
         let relation = sum.clone().foldl(relational_op.then(sum).repeated(), |left, (op, right)| {
             let span = left.span.start..right.span.end;
-            Expression { kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) }, span }
+            Expression { kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) }, span: span.into() }
         });
 
         // 优先级 8: 相等运算 (左结合)。
@@ -229,19 +229,19 @@ where
             .or(op(Token::NotEq).to(BinaryOp::NotEq));
         let equality = relation.clone().foldl(equality_op.then(relation).repeated(), |left, (op, right)| {
             let span = left.span.start..right.span.end;
-            Expression { kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) }, span }
+            Expression { kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) }, span: span.into() }
         });
 
         // 优先级 9: 逻辑与 (左结合)。
         let logical_and = equality.clone().foldl(op(Token::And).to(BinaryOp::And).then(equality).repeated(), |left, (op, right)| {
             let span = left.span.start..right.span.end;
-            Expression { kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) }, span }
+            Expression { kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) }, span: span.into() }
         });
 
         // 优先级 10: 逻辑或 (左结合)。
         let logical_or = logical_and.clone().foldl(op(Token::Or).to(BinaryOp::Or).then(logical_and).repeated(), |left, (op, right)| {
             let span = left.span.start..right.span.end;
-            Expression { kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) }, span }
+            Expression { kind: ExprKind::BinaryOp { op, left: Box::new(left), right: Box::new(right) }, span: span.into() }
         });
 
         // 优先级 11: 赋值 (右结合，但通过 `.or_not()` 实现)。

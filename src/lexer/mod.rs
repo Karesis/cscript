@@ -3,7 +3,7 @@ use logos::Logos;
 // 导入错误处理模组
 use crate::reporter::{CompilerError, LexerError};
 // 导入定位处理
-use std::ops::Range;
+use crate::utils::Span;
 use std::fmt;
 
 // 声明单元测试模块
@@ -226,7 +226,7 @@ fn lex_string_literal(lex: &mut logos::Lexer<Token>) -> Option<String> {
 
 /// 对源代码进行词法分析，返回一个 Token 向量，并将所有词法错误报告给 DiagnosticBag。
 /// 对源代码进行词法分析。
-pub fn lex(source: &str) -> (Vec<(Token, Range<usize>)>, Vec<CompilerError>) {
+pub fn lex(source: &str) -> (Vec<(Token, Span)>, Vec<CompilerError>) {
     let mut tokens = Vec::new();
     let mut errors: Vec<CompilerError> = Vec::new();
 
@@ -236,7 +236,7 @@ pub fn lex(source: &str) -> (Vec<(Token, Range<usize>)>, Vec<CompilerError>) {
     for (result, span) in lexer {
         match result {
             // 正常的 Token
-            Ok(token) => tokens.push((token, span)),
+            Ok(token) => tokens.push((token, span.into())),
 
             // logos 遇到了一个错误
             Err(_lexing_error) => {
