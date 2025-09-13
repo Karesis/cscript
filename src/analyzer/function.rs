@@ -1,9 +1,9 @@
 // In src/analyzer/functions.rs
 
-use super::{hir, statement, types, AnalysisContext, Lower};
+use super::{hir, statement};
 use crate::analyzer::symbols::SymbolInfo;
 use crate::parser::ast;
-use crate::reporter::{CompilerError, SemanticError}; 
+use crate::reporter::SemanticError; 
 use std::sync::Arc;
 
 /// [REFACTORED]

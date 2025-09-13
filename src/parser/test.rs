@@ -135,25 +135,37 @@ fn test_while_loop() {
 fn test_operator_precedence() {
     let source = r#"
         main() -> void {
-            a: int = 1 + 2 * 3; // should be parsed as 1 + (2 * 3)
+            a: int = 1 + 2 * 3; // 应该被解析为 1 + (2 * 3)
         }
     "#;
     let ast = parse_source_ok(source);
-    let func = match &ast.items[0] { GlobalItem::Function(f) => f, _ => panic!() };
-    let stmt = match &func.body.stmts[0] { Statement::Expr(e) => e, _ => panic!() };
-    // 断言顶层操作是赋值
-    if let ExprKind::Assignment { right, .. } = &stmt.kind {
-        // 断言赋值的右侧是一个二元运算
-        if let ExprKind::BinaryOp { op, right: mul_expr, ..} = &right.kind {
-            // 断言这个二元运算是加法
-            assert_eq!(*op, BinaryOp::Add);
-            // 断言加法的右侧是另一个二元运算（乘法）
-            matches!(&mul_expr.kind, ExprKind::BinaryOp { op: BinaryOp::Multiply, .. });
-        } else {
-            panic!("Expected a binary operation on the right side of assignment.");
+    let func = match &ast.items[0] { GlobalItem::Function(f) => f, _ => panic!("Expected a function definition") };
+
+    let decl_struct = match &func.body.stmts[0] {
+        Statement::VarDecl(d) => d,
+        other => panic!("Expected a VarDecl statement, but found {:?}", other),
+    };
+
+    let init_expr = decl_struct.init.as_ref().expect("Expected an initializer for the variable");
+
+    // 断言 AST 的结构是 Add(Literal(1), Multiply(Literal(2), Literal(3)))
+    match &init_expr.kind {
+        ExprKind::BinaryOp { op: top_op, left: left_expr, right: right_expr } => {
+            // 顶层应该是加法
+            assert_eq!(*top_op, BinaryOp::Add);
+
+            // 加法的左边应该是字面量 1
+            assert!(matches!(left_expr.kind, ExprKind::Literal(_)));
+
+            // 加法的右边应该是乘法表达式
+            match &right_expr.kind {
+                ExprKind::BinaryOp { op: inner_op, .. } => {
+                    assert_eq!(*inner_op, BinaryOp::Multiply);
+                }
+                other => panic!("Expected right side of Add to be a Multiply operation, got {:?}", other),
+            }
         }
-    } else {
-        panic!("Expected an assignment expression.");
+        other => panic!("Expected the initializer to be a BinaryOp, got {:?}", other),
     }
 }
 

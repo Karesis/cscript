@@ -97,39 +97,86 @@ fn generate_binary_op<'a, 'ctx>(
     let left_val = left.generate(ctx)?;
     let right_val = right.generate(ctx)?;
 
-    // analyzer 已经保证了 left 和 right 的类型是兼容的
-    match left.resolved_type {
+    // 定义一个辅助闭包，用于将 BuilderError 转换为我们自己的 CodeGenError。
+    // 这可以避免在每个分支中重复写同样的代码。
+    let map_builder_error = |e: inkwell::builder::BuilderError| CGE::InternalError {
+        message: e.to_string(),
+        span: left.span.clone().into(), // 使用左操作数的 span 来报告错误位置
+    };
+
+    match &left.resolved_type {
         SemanticType::Integer { is_signed, .. } => {
             let left_int = left_val.into_int_value();
             let right_int = right_val.into_int_value();
-            let result = match op {
+            
+            let result_val = match op {
                 BinaryOp::Add => ctx.codegen.builder.build_int_add(left_int, right_int, "addtmp"),
                 BinaryOp::Subtract => ctx.codegen.builder.build_int_sub(left_int, right_int, "subtmp"),
                 BinaryOp::Multiply => ctx.codegen.builder.build_int_mul(left_int, right_int, "multmp"),
-                BinaryOp::Divide => if is_signed {
+                BinaryOp::Divide => if *is_signed {
                     ctx.codegen.builder.build_int_signed_div(left_int, right_int, "sdivtmp")
                 } else {
                     ctx.codegen.builder.build_int_unsigned_div(left_int, right_int, "udivtmp")
                 },
-                BinaryOp::Modulo => if is_signed {
+                BinaryOp::Modulo => if *is_signed {
                     ctx.codegen.builder.build_int_signed_rem(left_int, right_int, "sremtmp")
                 } else {
                     ctx.codegen.builder.build_int_unsigned_rem(left_int, right_int, "uremtmp")
                 },
-                op => {
-                    let predicate = utils::int_predicate(op, is_signed);
+                cmp_op => {
+                    let predicate = utils::int_predicate(cmp_op, *is_signed);
                     ctx.codegen.builder.build_int_compare(predicate, left_int, right_int, "cmptmp")
                 }
             };
-            Ok(result.map(Into::into).map_err(|e| CGE::InternalError{ message: e.to_string(), span: left.span.into() })?)
+
+            // 将 Result<IntValue, BuilderError> 转换为 Result<BasicValueEnum, CodeGenError>
+            result_val.map(Into::into).map_err(map_builder_error)
         }
+
         SemanticType::Float { .. } => {
-             // ... [Similar logic for float operations] ...
-            unimplemented!()
+            let left_float = left_val.into_float_value();
+            let right_float = right_val.into_float_value();
+
+            // [FIXED] 在每个分支内处理 Result，并返回统一的类型
+            match op {
+                BinaryOp::Add => ctx.codegen.builder.build_float_add(left_float, right_float, "faddtmp")
+                    .map(Into::into).map_err(map_builder_error),
+                BinaryOp::Subtract => ctx.codegen.builder.build_float_sub(left_float, right_float, "fsubtmp")
+                    .map(Into::into).map_err(map_builder_error),
+                BinaryOp::Multiply => ctx.codegen.builder.build_float_mul(left_float, right_float, "fmultmp")
+                    .map(Into::into).map_err(map_builder_error),
+                BinaryOp::Divide => ctx.codegen.builder.build_float_div(left_float, right_float, "fdivtmp")
+                    .map(Into::into).map_err(map_builder_error),
+                BinaryOp::Modulo => ctx.codegen.builder.build_float_rem(left_float, right_float, "fremtmp")
+                    .map(Into::into).map_err(map_builder_error),
+                
+                cmp_op => {
+                    let predicate = utils::float_predicate(cmp_op);
+                    ctx.codegen.builder.build_float_compare(predicate, left_float, right_float, "fcmptmp")
+                        .map(Into::into).map_err(map_builder_error)
+                }
+            }
         }
+
         SemanticType::Bool => {
-            // ... [Similar logic for bool operations] ...
-            unimplemented!()
+            let left_bool = left_val.into_int_value();
+            let right_bool = right_val.into_int_value();
+
+            // [FIXED] `match op` 的结果现在是一个 Result<IntValue, BuilderError>
+            let result_val = match op {
+                BinaryOp::And => ctx.codegen.builder.build_and(left_bool, right_bool, "andtmp"),
+                BinaryOp::Or => ctx.codegen.builder.build_or(left_bool, right_bool, "ortmp"),
+                BinaryOp::Eq => ctx.codegen.builder.build_int_compare(
+                    inkwell::IntPredicate::EQ, left_bool, right_bool, "booleqtmp"
+                ),
+                BinaryOp::NotEq => ctx.codegen.builder.build_int_compare(
+                    inkwell::IntPredicate::NE, left_bool, right_bool, "boolnetmp"
+                ),
+                _ => unreachable!("Invalid binary operation on booleans should be caught by analyzer"),
+            };
+
+            // [FIXED] 对 result_val 应用和 Integer 分支完全相同的转换逻辑
+            result_val.map(Into::into).map_err(map_builder_error)
         }
         _ => unreachable!("Binary operations on non-numeric/bool types should be caught by analyzer"),
     }

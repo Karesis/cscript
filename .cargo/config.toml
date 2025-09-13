@@ -1,0 +1,7 @@
+# In .cargo/config.toml
+
+[env]
+# 告诉 llvm-sys crate 在哪里找到 LLVM 18.x 版本。
+# 确保路径是你自己环境中 LLVM 18 的真实路径。
+# Cargo 会在运行构建脚本时自动设置这个环境变量。
+LLVM_SYS_181_PREFIX = "/home/elaine/devdeps/llvm-18" 
