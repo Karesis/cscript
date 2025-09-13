@@ -1,0 +1,36 @@
+// --- Comprehensive Sanity Test for CScript Compiler ---
+
+// 1. 测试全局变量
+// 这个变量将在 main 函数中被使用。
+global_exit_code: int = 100;
+
+// 2. 测试一个带有参数和返回值的辅助函数
+// 它将两个整数相加。
+add(a: int, b: int) -> int {
+    // 2a. 测试返回一个二元表达式的结果
+    return a + b;
+}
+
+// 3. 测试主函数，这将是程序的入口点
+// 我们期望它最终返回 100 + (10 + 42) = 152
+main() -> int {
+    // 3a. 测试局部变量声明和初始化
+    start_value: int = 10;
+
+    // 3b. 测试函数调用，并将结果赋值给一个新的局部变量
+    // `add` 函数将被调用，参数是 10 和 42
+    sum_result: int = add(start_value, 42);
+
+    // 3c. 测试读取全局变量，并与一个局部变量进行运算
+    final_result: int = global_exit_code + sum_result;
+    
+    // 3d. 测试一个 if 语句和比较运算符
+    // 这是为了验证控制流的代码生成
+    if (final_result > 150) {
+        // 如果一切正确，final_result 是 152，这个分支将被执行
+        return final_result;
+    } else {
+        // 如果逻辑错误，将返回一个错误码
+        return -1;
+    }
+}
