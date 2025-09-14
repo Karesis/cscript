@@ -5,7 +5,7 @@ use miette::{Report, NamedSource}; // <-- 导入 miette 的关键部分
 use std::fs;
 use std::path::PathBuf;
 
-use cscript_ref::{compile, reporter::CompilerError};
+use cscript::{compile, reporter::CompilerError};
 
 /// CScript 语言的编译器
 #[derive(Parser, Debug)]
