@@ -24,6 +24,11 @@ pub enum CompilerError {
     #[diagnostic(transparent)]
     Semantic(#[from] SemanticError),
 
+    /// 模块解析阶段的错误
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Resolver(#[from] ResolverError),
+
     /// 代码生成阶段的错误
     #[error(transparent)]
     #[diagnostic(transparent)]
@@ -255,4 +260,44 @@ pub enum CodeGenError {
         #[label("此表达式不是一个常量")]
         span: SourceSpan,
     },
+}
+
+/// 模块解析器可能产生的所有错误的集合。
+#[derive(Debug, Error, Diagnostic)]
+pub enum ResolverError {
+    #[error("无法读取文件: {path}")]
+    #[diagnostic(
+        code(E0401), // 新的错误码
+        help("请检查文件是否存在以及程序是否有读取权限。详细错误: {io_error}")
+    )]
+    FileReadError {
+        path: String,
+        io_error: String,
+        #[label("尝试读取这个文件时失败")]
+        span: SourceSpan, // 这个 span 会指向导致读取的 `use` 语句
+    },
+
+    #[error("无法规范化文件路径: {path}")] // <-- 确认这个变体存在
+    #[diagnostic(
+        code(E0402),
+        help("这通常由无效的符号链接或权限问题引起。详细错误: {io_error}")
+    )]
+    CanonicalizationError {
+        path: String,
+        io_error: String,
+        #[label("在处理这个路径时出错")]
+        span: SourceSpan,
+    },
+
+    #[error("找不到模块: 无法解析路径 '{path}'")]
+    #[diagnostic(
+        code(E0404), // 借用 HTTP 404 的灵感 :)
+        help("请检查路径是否正确，以及文件是否存在。")
+    )]
+    ModuleNotFound {
+        path: String,
+        #[label("在这条 `use` 语句中引用的模块找不到")]
+        span: SourceSpan,
+    },
+    // 我们将在这里根据需要添加更多错误...
 }
