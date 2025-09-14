@@ -12,6 +12,7 @@ pub struct Program {
 /// 程序中的顶层项，例如函数或全局变量。
 #[derive(Debug, Clone)]
 pub enum GlobalItem {
+    Use(UseDecl), // 用于use声明
     Extern(ExternBlock), 
     Struct(StructDef),
     Function(FunctionDef),
@@ -63,6 +64,67 @@ pub struct FunctionDecl {
 pub struct Block {
     pub stmts: Vec<Statement>,
     pub span: Span,
+}
+
+// --- 模块系统 --- //
+
+/// 代表一个 `use` 声明，例如 `use root::io::File;`
+#[derive(Debug, Clone)]
+pub struct UseDecl {
+    /// 导入的路径，例如 `root::io`
+    pub path: UsePath,
+    /// 导入的目标，例如 `*` 或 `{File, Dir}`
+    pub target: UseTree,
+    pub span: Span,
+}
+
+/// 代表 `use` 语句中的路径部分
+#[derive(Debug, Clone)]
+pub struct UsePath {
+    /// 路径的类型（是否以 root 或 super 开头）
+    pub kind: PathKind,
+    /// 路径的各个分段
+    pub segments: Vec<Ident>,
+    pub span: Span,
+}
+
+/// 路径的类型
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PathKind {
+    /// 从项目根开始，例如 `root::...`
+    Root,
+    /// 从父模块开始，例如 `super::...`
+    Super,
+    /// 相对路径，例如 `my_module::...`
+    Relative,
+}
+
+/// 代表 `use` 路径后导入的目标
+#[derive(Debug, Clone)]
+pub enum UseTree {
+    /// 简单导入，没有 `*` 或 `{}`，例如 `use path;`
+    Simple,
+    /// 通配符导入，例如 `use path::*;`
+    Glob,
+    /// 嵌套列表导入，例如 `use path::{item1, item2 as alias};`
+    Nested {
+        items: Vec<NestedUseItem>,
+        span: Span,
+    },
+}
+
+/// 嵌套 `use` 列表中的单个项
+#[derive(Debug, Clone)]
+pub enum NestedUseItem {
+    /// 一个简单的项，例如 `File`
+    Simple {
+        name: Ident,
+    },
+    /// 一个重命名的项，例如 `Response as Resp`
+    Renamed {
+        original: Ident,
+        new_name: Ident,
+    },
 }
 
 // --- 语句 --- //

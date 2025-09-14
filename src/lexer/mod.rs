@@ -58,6 +58,14 @@ pub enum Token {
     Struct,
     #[token("extern")]
     Extern,
+    #[token("use")]
+    Use,
+    #[token("pub")]
+    Pub,
+    #[token("root")]
+    Root,
+    #[token("super")]
+    Super,
 
     // 有符号整数家族 (i-family)
     #[token("i8")]
@@ -146,6 +154,8 @@ pub enum Token {
     Ampersand,
 
     // 连接符号
+    #[token("::")] 
+    DoubleColon,
     #[token(".")]
     Dot,
     #[token(":")]      

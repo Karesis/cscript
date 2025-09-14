@@ -330,6 +330,73 @@ where
 
     // --- 顶层项解析 ---
 
+    // --- 新增：解析 use 声明 (任务 1.2) ---
+    // e.g., `use root::http::{Request, Response as Resp};`
+    let use_decl_parser = {
+        // 解析路径的第一部分，确定是 root, super, 还是相对路径
+        let path_kind = choice((
+            just(Token::Root).to(PathKind::Root),
+            just(Token::Super).to(PathKind::Super),
+        )).or_not() // .or_not() 使其成为可选的
+           .map(|kind_opt| kind_opt.unwrap_or(PathKind::Relative));
+
+        // 解析一个完整的路径, e.g., `root::http::server`
+        let use_path_parser = path_kind
+            .then(
+                ident.clone()
+                    .separated_by(just(Token::DoubleColon))
+                    .at_least(1) // 路径至少要有一个部分
+                    .collect::<Vec<_>>()
+            )
+            .map_with(|(kind, segments), e| UsePath { kind, segments, span: e.span() });
+
+        // 解析嵌套 use 列表中的单个项, e.g., `Request` or `Response as Resp`
+        let nested_use_item_parser = {
+            // 解析 `Response as Resp`
+            let renamed = ident.clone()
+                .then_ignore(
+                    // 注意：我们在这里直接匹配一个名为 "as" 的标识符 Token。
+                    // 一个更健壮的设计可能是在 Lexer 中为 `as` 添加一个专门的 Token。
+                    select! { Token::Ident(s) if s == "as" => () }
+                )
+                .then(ident.clone())
+                .map(|(original, new_name)| NestedUseItem::Renamed { original, new_name });
+
+            // 解析 `Request`
+            let simple = ident.clone().map(|name| NestedUseItem::Simple { name });
+
+            choice((renamed, simple))
+        };
+        
+        // 解析 use 路径后面的目标部分
+        let use_tree_parser = choice((
+            // 匹配通配符 `*`
+            just(Token::Star).to(UseTree::Glob),
+            // 匹配嵌套列表 `{...}`
+            nested_use_item_parser
+                .separated_by(just(Token::Comma))
+                .allow_trailing()
+                .collect()
+                .delimited_by(just(Token::LBrace), just(Token::RBrace))
+                .map_with(|items, e| UseTree::Nested { items, span: e.span() }),
+        ));
+        
+        // 组合成完整的 use 声明解析器
+        just(Token::Use)
+            .ignore_then(use_path_parser)
+            .then(
+                // 路径后面的 `*` 或 `{...}` 是可选的
+                use_tree_parser.or_not()
+            )
+            .then_ignore(just(Token::Semicolon))
+            .map_with(|(path, target_opt), e| {
+                // 如果没有匹配到 `*` 或 `{...}`，则默认为 Simple UseTree
+                let target = target_opt.unwrap_or(UseTree::Simple);
+                UseDecl { path, target, span: e.span() }
+            })
+            .labelled("use declaration")
+    };
+
     // 解析结构体定义, e.g., `struct Point { x: i32, y: i32 }`
     let struct_def_parser = {
         // 解析单个字段, e.g., `x: i32`
@@ -446,6 +513,7 @@ where
 
     // `item` 解析器代表任何一个顶层定义。
     let item = choice((
+        use_decl_parser.map(GlobalItem::Use), 
         extern_block_parser.map(GlobalItem::Extern),
         struct_def_parser.map(GlobalItem::Struct),
         func_def,
