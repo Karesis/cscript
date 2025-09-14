@@ -13,6 +13,9 @@ use crate::utils::Span;
 use crate::parser::ast::{BinaryOp, Ident, UnaryOp};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+use std::path::PathBuf;
+use std::collections::HashMap;
+use std::sync::RwLock;
 
 /// 一个可以精确表示 HIR 中整数值的枚举。
 /// 它可以无损地存储所有宽度不超过 128 位的有符号或无符号整数。
@@ -73,15 +76,43 @@ pub enum Storage {
 
 // --- HIR 节点定义 ---
 
-/// HIR 的根节点，代表一个完整的、经过分析的 CScript 程序。
+/// HIR 的根节点，代表一个完整的、经过分析的 CScript 包（Crate）。
+/// 这是 analyzer 的最终输出。
+#[derive(Debug, Default)]
+pub struct Crate {
+    /// 包中包含的所有模块。
+    /// Key 是模块的规范化文件路径。
+    pub modules: HashMap<PathBuf, Module>,
+    /// 入口模块的路径，通常是提供给编译器的第一个文件。
+    pub entry_module: PathBuf,
+}
+
+/// 代表一个模块的内容，由一个源文件编译而来。
 #[derive(Debug)]
-pub struct Program {
+pub struct Module {
+    /// [NEW] 模块中定义的所有结构体。
+    pub structs: Vec<Arc<StructDef>>,
     /// 程序中定义的所有函数。
     pub functions: Vec<Function>,
     /// 程序中定义的所有全局变量。
     pub globals: Vec<Arc<VarDecl>>,
     /// 通过 `extern` 声明的外部函数。
     pub extern_functions: Vec<Arc<FunctionDecl>>,
+}
+
+// --- [NEW] 新增结构体定义 ---
+/// 代表一个完整的、经过语义分析的结构体定义。
+/// 它被 `Arc` 包裹，因为它可以被多个地方共享引用。
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct StructDef {
+    /// 结构体名。
+    pub name: Ident,
+    /// 结构体的字段列表，每个字段都包含名称和已解析的语义类型。
+    pub fields: Vec<(Ident, SemanticType)>,
+    /// 是否为公开的结构体。
+    pub is_public: bool,
+    /// 结构体在源代码中的位置。
+    pub span: Span,
 }
 
 /// 代表一个函数声明（没有函数体），主要用于 `extern` 函数。
@@ -95,17 +126,16 @@ pub struct FunctionDecl {
     pub return_type: SemanticType,
     /// 是否为可变参数函数（例如 `printf`）。
     pub is_variadic: bool,
+    /// 是否为公开函数。对于 extern 函数，这总是 true。
+    pub is_public: bool, 
 }
 
 /// 代表一个完整的函数定义（包含函数体）。
 #[derive(Debug)]
 pub struct Function {
-    /// 函数名。
-    pub name: Ident,
-    /// 参数列表。每个参数都是一个完整的变量声明。
-    pub params: Vec<Arc<VarDecl>>,
-    /// 返回值类型。
-    pub return_type: SemanticType,
+    // 函数的声明部分，包含名称、参数、返回类型等。
+    // 将其提取出来可以方便地在函数调用点共享。
+    pub decl: Arc<FunctionDecl>,
     /// 函数体，是一个语句块。
     pub body: Block,
 }
@@ -161,6 +191,8 @@ pub struct VarDecl {
     pub var_type: SemanticType,
     /// 是否为常量。
     pub is_const: bool,
+    /// 是否为公开的全局变量。
+    pub is_public: bool,
     /// 分析后确定的存储位置。
     pub storage: Storage,
     /// 可选的初始化表达式，也已经过完整分析。
@@ -234,7 +266,9 @@ pub enum ExprKind {
     },
     /// 函数调用。
     FunctionCall {
-        name: Ident,
+        /// **关键修改**: 不再是按名称查找，而是直接链接到函数的声明。
+        /// 这使得跨模块调用变得无歧义。
+        callee: Arc<FunctionDecl>,
         args: Vec<Expression>,
     },
     /// 取地址运算，例如 `&x`。
